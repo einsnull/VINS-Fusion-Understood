@@ -80,6 +80,7 @@ fi
 LOOP_FUSION=0
 GLOBAL_FUSION=0
 KITTI=0
+UI_OPTION=1
 
 while getopts "hglk" opt; do
     case "$opt" in
@@ -107,36 +108,26 @@ else
     KITTI_DATASET="$(absPath ${*: -1})"
 fi
 
-roscore &
-ROSCORE_PID=$!
-sleep 1
-
-rviz -d ../config/vins_rviz_config.rviz &
-RVIZ_PID=$!
-
 VINS_FUSION_DIR=$(absPath "..")
 
 if [ $KITTI -eq 0 ]; then
     if [ $LOOP_FUSION -eq 0 ]; then
         docker run \
-        -it \
+        -d \
         --rm \
         --net=host \
+        --gpus all \
+        -v /tmp/.X11-unix:/tmp/.X11-unix \
+        -e DISPLAY=$DISPLAY \
+        -e NVIDIA_VISIBLE_DEVICES=all \
+        -e NVIDIA_DRIVER_CAPABILITIES=all \
         -v ${VINS_FUSION_DIR}:/root/catkin_ws/src/VINS-Fusion/ \
+        -v ${VINS_FUSION_DIR}/docker/start_vins.sh:/root/start_vins.sh \
         ros:vins-fusion \
-        /bin/bash -c \
-        "cd /root/catkin_ws/; \
-        catkin config \
-                --env-cache \
-                --extend /opt/ros/$ROS_DISTRO \
-            --cmake-args \
-                -DCMAKE_BUILD_TYPE=Release; \
-            catkin build; \
-            source devel/setup.bash; \
-            rosrun vins vins_node ${CONFIG_IN_DOCKER}"
+        /bin/bash /root/start_vins.sh ${CONFIG_IN_DOCKER} ${UI_OPTION}
     else
         docker run \
-        -it \
+        -d \
         --rm \
         --net=host \
         -v ${VINS_FUSION_DIR}:/root/catkin_ws/src/VINS-Fusion/ \
@@ -156,7 +147,7 @@ if [ $KITTI -eq 0 ]; then
 else
     if [ $LOOP_FUSION -eq 1 ]; then
         docker run \
-        -it \
+        -d \
         --rm \
         --net=host \
         -v ${VINS_FUSION_DIR}:/root/catkin_ws/src/VINS-Fusion/ \
@@ -175,7 +166,7 @@ else
             rosrun vins kitti_odom_test ${CONFIG_IN_DOCKER} /root/kitti_dataset/"
     elif [ $GLOBAL_FUSION -eq 1 ]; then
         docker run \
-        -it \
+        -d \
         --rm \
         --net=host \
         -v ${VINS_FUSION_DIR}:/root/catkin_ws/src/VINS-Fusion/ \
@@ -194,7 +185,7 @@ else
             rosrun vins kitti_gps_test ${CONFIG_IN_DOCKER} /root/kitti_dataset/"
     else
         docker run \
-        -it \
+        -d \
         --rm \
         --net=host \
         -v ${VINS_FUSION_DIR}:/root/catkin_ws/src/VINS-Fusion/ \
@@ -211,13 +202,4 @@ else
             source devel/setup.bash; \
             rosrun vins kitti_odom_test ${CONFIG_IN_DOCKER} /root/kitti_dataset/"
     fi
-fi
-
-wait $ROSCORE_PID
-wait $RVIZ_PID
-
-if [[ $? -gt 128 ]]
-then
-    kill $ROSCORE_PID
-    kill $RVIZ_PID
 fi

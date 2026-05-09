@@ -1,4 +1,4 @@
-FROM ros:kinetic-perception
+FROM ros:kinetic
 
 ENV CERES_VERSION="1.12.0"
 ENV CATKIN_WS=/root/catkin_ws
@@ -23,8 +23,28 @@ RUN if [ "x$(nproc)" = "x1" ] ; then export USE_PROC=1 ; \
     libegl1-mesa-dev \
     libwayland-dev \
     libxkbcommon-dev \
-    wayland-protocols && \
+    wayland-protocols \
+    libgl1-mesa-dev \
+    libgl1-mesa-dri \
+    libglapi-mesa \
+    mesa-utils \
+    libx11-dev \
+    libx11-xcb1 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxcb-xinerama0 \
+    libxcb-xfixes0 && \
     rm -rf /var/lib/apt/lists/*
+
+# Fix NVIDIA OpenGL symlinks for Pangolin
+RUN ln -sf /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0 /usr/lib/x86_64-linux-gnu/libGL.so && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0 /usr/lib/x86_64-linux-gnu/libGL.so.1 && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libGLESv2_nvidia.so.2 /usr/lib/x86_64-linux-gnu/libGLESv2.so && \
+    ldconfig && \
+    rm -rf /usr/lib/x86_64-linux-gnu/mesa
 
 # Build and install gflags
 RUN if [ "x$(nproc)" = "x1" ] ; then export USE_PROC=1 ; \
@@ -40,9 +60,9 @@ RUN if [ "x$(nproc)" = "x1" ] ; then export USE_PROC=1 ; \
 # Build and install Ceres
 RUN if [ "x$(nproc)" = "x1" ] ; then export USE_PROC=1 ; \
     else export USE_PROC=$(($(nproc)/2)) ; fi && \
-    git clone https://ceres-solver.googlesource.com/ceres-solver && \
+    git clone https://github.com/ceres-solver/ceres-solver && \
     cd ceres-solver && \
-    git checkout tags/${CERES_VERSION} && \
+    git checkout ${CERES_VERSION} && \
     mkdir build && cd build && \
     cmake .. && \
     make -j$(USE_PROC) install && \
