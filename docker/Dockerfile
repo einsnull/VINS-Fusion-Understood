@@ -17,6 +17,7 @@ RUN if [ "x$(nproc)" = "x1" ] ; then export USE_PROC=1 ; \
     ros-${ROS_DISTRO}-image-transport \
     ros-${ROS_DISTRO}-message-filters \
     ros-${ROS_DISTRO}-tf \
+    ros-${ROS_DISTRO}-rviz \
     libglew-dev \
     libpython2.7-dev \
     pkg-config \

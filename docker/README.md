@@ -7,7 +7,7 @@
 ## 环境要求
 
 - NVIDIA GPU + NVIDIA 驱动
-- Docker with NVIDIA runtime
+- Docker with NVIDIA runtime (`nvidia-docker2`)
 - ROS Kinetic
 - EuRoC MAV 数据集
 
@@ -29,7 +29,7 @@ xhost +local:docker
 ```
 
 这将启动：
-- roscore
+- roscore（自动）
 - VINS 节点（Pangolin UI）
 - 容器保持运行
 
@@ -43,24 +43,43 @@ docker exec <container_name> bash -c "source /opt/ros/kinetic/setup.bash && cd /
 
 ### 4. 查看 RViz 可视化
 
-```bash
-# 安装 RViz（首次）
-docker exec <container_name> bash -c "apt-get update && apt-get install -y ros-kinetic-rviz"
+RViz 已在 Dockerfile 中预装。启动命令：
 
-# 启动 RViz
+```bash
 docker exec -e DISPLAY=:1 <container_name> bash -c "source /opt/ros/kinetic/setup.bash && rviz -d /root/catkin_ws/src/VINS-Fusion/config/vins_rviz_config.rviz"
 ```
 
-## 命令说明
+## 一键启动命令
 
-### run.sh 选项
+在宿主机按顺序执行：
+
+```bash
+# 终端 1: 启动 VINS
+cd VINS-Fusion/docker
+xhost +local:docker
+./run.sh ../config/euroc/euroc_stereo_imu_config.yaml
+
+# 终端 2: 启动 RViz（等待 VINS 启动后再执行）
+docker exec -e DISPLAY=:1 <container_name> bash -c "source /opt/ros/kinetic/setup.bash && rviz -d /root/catkin_ws/src/VINS-Fusion/config/vins_rviz_config.rviz"
+
+# 终端 3: 播放数据
+docker exec <container_name> bash -c "source /opt/ros/kinetic/setup.bash && cd /root/catkin_ws && source devel/setup.bash && rosbag play /root/catkin_ws/src/VINS-Fusion/dataset/machine_hall/MH_01_easy/MH_01_easy.bag --clock"
+```
+
+获取容器名：
+
+```bash
+docker ps | grep ros:vins-fusion | awk '{print $NF}'
+```
+
+## run.sh 选项
 
 ```bash
 ./run.sh <config_file>          # 带 UI 运行（默认）
 ./run.sh <config_file> 0        # 不带 UI 运行
 ```
 
-### 主要话题
+## 主要话题
 
 | 话题名 | 类型 | 说明 |
 |--------|------|------|
@@ -104,7 +123,7 @@ Authorization required, but no authorization protocol specified
 
 ### 3. 找不到 roscore
 
-确保使用 `--net=host` 网络模式。
+确保使用 `--net=host` 网络模式（已在 run.sh 中配置）。
 
 ## 容器管理
 
@@ -124,6 +143,6 @@ docker stop <container_name>
 
 ## 文件说明
 
-- `Dockerfile` - Docker 镜像构建文件
+- `Dockerfile` - Docker 镜像构建文件（包含 RViz）
 - `run.sh` - 启动脚本
 - `start_vins.sh` - 容器内启动脚本（自动挂载到容器）
