@@ -27,7 +27,9 @@
 #include "../utility/tic_toc.h"
 
 // Deep learning feature support
+#ifdef USE_TENSORRT
 #include "../deep_net/superpoint_lightglue.h"
+#endif
 
 using namespace std;
 using namespace Eigen;
@@ -147,9 +149,11 @@ class FeatureTracker {
     cv::Mat img_track_show_;                                                //[原imTrack]绘制track结果到这个图像上，用于ui显示
 
     // ==================== SuperPoint + LightGlue 成员 ====================
+#ifdef USE_TENSORRT
     std::shared_ptr<dl::SuperPointLightGlue> deep_net_;  // 深度学习推理器
     std::vector<dl::SpFeature> prev_sp_feats_;           // 上一帧SuperPoint特征
     std::vector<dl::SpFeature> cur_sp_feats_;            // 当前帧SuperPoint特征
+#endif
     bool use_deep_features_;                             // 是否使用深度学习特征
     int deep_feature_mode_;                              // 0: SP+光流, 1: SP+LightGlue
     std::string sp_engine_path_;                         // SuperPoint引擎路径

@@ -1,0 +1,35 @@
+# Dataset files
+dataset/
+*.bag
+*.zip
+*.tar.gz
+
+# Build artifacts
+build/
+devel/
+install/
+logs/
+.catkin_tools/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# Documentation (keep in repo but not needed in Docker)
+# *.md
+
+# Models (already copied separately)
+# models/
+
+# Scripts (already copied separately)
+# scripts/

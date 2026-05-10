@@ -678,6 +678,8 @@ bool FeatureTracker::inBorder(const cv::Point2f &pt) {
 
 // ==================== SuperPoint + LightGlue 实现 ====================
 
+#ifdef USE_TENSORRT
+
 bool FeatureTracker::initDeepNet(const std::string& spEnginePath,
                                   const std::string& lgEnginePath,
                                   int mode) {
@@ -879,5 +881,29 @@ void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {
     LOG(INFO) << "[SP+Flow] tracked " << tracked_pts.size() << " features, added " 
               << (cur_pts_.size() - tracked_pts.size()) << " new";
 }
+
+#else // !USE_TENSORRT
+
+bool FeatureTracker::initDeepNet(const std::string& spEnginePath,
+                                  const std::string& lgEnginePath,
+                                  int mode) {
+    LOG(WARNING) << "TensorRT not available, deep learning features disabled";
+    use_deep_features_ = false;
+    return false;
+}
+
+void FeatureTracker::extractSuperPoint(const cv::Mat& img) {
+    LOG(WARNING) << "SuperPoint not available, built without TensorRT";
+}
+
+void FeatureTracker::matchLightGlue(const cv::Mat& img) {
+    LOG(WARNING) << "LightGlue not available, built without TensorRT";
+}
+
+void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {
+    LOG(WARNING) << "SuperPoint+Flow not available, built without TensorRT";
+}
+
+#endif // USE_TENSORRT
 
 
