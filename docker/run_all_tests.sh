@@ -35,7 +35,7 @@ run_test() {
         -v /tmp/.X11-unix:/tmp/.X11-unix \
         -v "$DATASET_DIR:/dataset:ro" \
         -v "$OUTPUT_DIR:/root/output" \
-        --name "vins_$(echo $TEST_NAME | tr ' ' '_')" \
+        --name "vins_${TEST_NAME//[^a-zA-Z0-9]/_}" \
         $IMAGE \
         /bin/bash -c "
             source /opt/ros/kinetic/setup.bash
