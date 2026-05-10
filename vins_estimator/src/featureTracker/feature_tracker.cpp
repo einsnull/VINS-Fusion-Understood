@@ -41,6 +41,8 @@ FeatureTracker::FeatureTracker() {
     flag_stereo_cam_ = 0;
     pt_id_ = 0;
     has_predict_feats_ = false;
+    use_deep_features_ = false;
+    deep_feature_mode_ = 0;
 }
 
 void FeatureTracker::readIntrinsicParameter(const vector<string> &calib_file) {
@@ -71,6 +73,125 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
     col_ = cur_img.cols;
     cv::Mat rightImg = _img1;
     cur_pts_.clear();
+    
+    // ==================== 深度学习特征模式 ====================
+    if (use_deep_features_) {
+        if (deep_feature_mode_ == 1) {
+            // SuperPoint + LightGlue匹配
+            matchLightGlue(cur_img);
+        } else {
+            // SuperPoint + 光流追踪
+            trackSuperPointFlow(cur_img);
+        }
+        
+        // 继续处理双目和返回结果（与传统模式相同）
+        // ... （后续代码与传统模式共享）
+        
+        // 当前帧左目图像特征点，去畸变&保存坐标，计算像素移动速度
+        cur_un_pts = undistortedPts(cur_pts_, m_camera[0]);
+        pts_velocity_ = ptsVelocity(cur_ids_, cur_un_pts, cur_un_pts_map_, prev_un_pts_map_);
+        
+        // 如果是双目方案，在【当前帧】的【左右图像】之间进行光流追踪
+        if(!_img1.empty() && flag_stereo_cam_) {
+            TicToc lk_timer;
+            iDs_right_.clear();
+            cur_right_pts_.clear();
+            cur_right_un_pts.clear();
+            right_pts_velocity_.clear();
+            cur_right_un_pts_map_.clear();
+            if(!cur_pts_.empty()) {
+                vector<cv::Point2f> reverseLeftPts;
+                vector<uchar> lkStatusL2R, lkStatusR2L;
+                vector<float> lkErr;
+                cv::calcOpticalFlowPyrLK(cur_img, rightImg, cur_pts_, cur_right_pts_, lkStatusL2R, lkErr, cv::Size(21, 21), 3);
+                if(FLOW_BACK) {
+                    cv::calcOpticalFlowPyrLK(rightImg, cur_img, cur_right_pts_, reverseLeftPts, lkStatusR2L, lkErr, cv::Size(21, 21), 3);
+                    for(size_t i = 0; i < lkStatusL2R.size(); i++) {
+                        if(lkStatusL2R[i] && lkStatusR2L[i] && inBorder(cur_right_pts_[i]) 
+                            && distance(cur_pts_[i], reverseLeftPts[i]) <= 0.5) {
+                            lkStatusL2R[i] = 1;
+                        }
+                        else {
+                            lkStatusL2R[i] = 0;
+                        }
+                    }
+                }
+                
+                iDs_right_ = cur_ids_;
+                reduceVector(cur_right_pts_, lkStatusL2R);
+                reduceVector(iDs_right_, lkStatusL2R);
+                
+                cur_right_un_pts = undistortedPts(cur_right_pts_, m_camera[1]);
+                right_pts_velocity_ = ptsVelocity(iDs_right_, cur_right_un_pts, cur_right_un_pts_map_, prev_right_un_pts_map_);
+                
+                LOG(INFO) << "[LK] curr: left2right, tracked " << iDs_right_.size() << " feats, took " << lk_timer.toc() << "ms";
+            }
+        }
+        
+        // 绘制追踪结果
+        if(SHOW_TRACK) {
+            drawTrack(cur_img, rightImg, cur_ids_, cur_pts_, cur_right_pts_, prev_pts_map_);
+        }
+        
+        // 更新成员变量
+        prev_time = cur_time;
+        prev_img = cur_img;
+        prev_pts = cur_pts_;
+        prev_un_pts = cur_un_pts;
+        prev_un_pts_map_ = cur_un_pts_map_;
+        prev_right_un_pts_map_ = cur_right_un_pts_map_;
+        has_predict_feats_ = false;
+        prev_pts_map_.clear();
+        for(size_t i = 0; i < cur_pts_.size(); i++) {
+            prev_pts_map_[cur_ids_[i]] = cur_pts_[i];
+        }
+        
+        // 返回结果
+        map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> feats_frame;
+        
+        for (size_t i = 0; i < cur_ids_.size(); i++) {
+            int feat_id = cur_ids_[i];
+            double x, y ,z;
+            x = cur_un_pts[i].x;
+            y = cur_un_pts[i].y;
+            z = 1;
+            double p_u, p_v;
+            p_u = cur_pts_[i].x;
+            p_v = cur_pts_[i].y;
+            int camera_id = 0;
+            double velocity_x, velocity_y;
+            velocity_x = pts_velocity_[i].x;
+            velocity_y = pts_velocity_[i].y;
+            
+            Eigen::Matrix<double, 7, 1> xyz_uv_velocity;
+            xyz_uv_velocity << x, y, z, p_u, p_v, velocity_x, velocity_y;
+            feats_frame[feat_id].emplace_back(camera_id,  xyz_uv_velocity);
+        }
+        
+        if (!_img1.empty() && flag_stereo_cam_) {
+            for (size_t i = 0; i < iDs_right_.size(); i++) {
+                int feat_id = iDs_right_[i];
+                double x, y ,z;
+                x = cur_right_un_pts[i].x;
+                y = cur_right_un_pts[i].y;
+                z = 1;
+                double p_u, p_v;
+                p_u = cur_right_pts_[i].x;
+                p_v = cur_right_pts_[i].y;
+                int camera_id = 1;
+                double velocity_x, velocity_y;
+                velocity_x = right_pts_velocity_[i].x;
+                velocity_y = right_pts_velocity_[i].y;
+                
+                Eigen::Matrix<double, 7, 1> xyz_uv_velocity;
+                xyz_uv_velocity << x, y, z, p_u, p_v, velocity_x, velocity_y;
+                feats_frame[feat_id].emplace_back(camera_id,  xyz_uv_velocity);
+            }
+        }
+        
+        return feats_frame;
+    }
+    // ==================== 传统特征模式（原有代码） ====================
 
     /*
     {
@@ -553,6 +674,210 @@ bool FeatureTracker::inBorder(const cv::Point2f &pt) {
     int pixel_y = cvRound(pt.y);
     return (BORDER_SIZE <= pixel_x && pixel_x < col_ - BORDER_SIZE && 
             BORDER_SIZE <= pixel_y && pixel_y < row_ - BORDER_SIZE);
+}
+
+// ==================== SuperPoint + LightGlue 实现 ====================
+
+bool FeatureTracker::initDeepNet(const std::string& spEnginePath,
+                                  const std::string& lgEnginePath,
+                                  int mode) {
+    sp_engine_path_ = spEnginePath;
+    lg_engine_path_ = lgEnginePath;
+    deep_feature_mode_ = mode;
+    
+    deep_net_ = std::make_shared<dl::SuperPointLightGlue>();
+    
+    if (!deep_net_->init(spEnginePath, lgEnginePath, mode)) {
+        LOG(WARNING) << "Failed to initialize deep net, falling back to traditional features";
+        use_deep_features_ = false;
+        deep_net_.reset();
+        return false;
+    }
+    
+    use_deep_features_ = true;
+    LOG(INFO) << "Deep net initialized successfully. Mode: " << mode;
+    return true;
+}
+
+void FeatureTracker::extractSuperPoint(const cv::Mat& img) {
+    if (!deep_net_ || !use_deep_features_) return;
+    
+    // 提取SuperPoint特征
+    cur_sp_feats_ = deep_net_->extractFeatures(img);
+    
+    // 转换为VINS格式
+    cur_pts_.clear();
+    cur_ids_.clear();
+    tracked_times_.clear();
+    
+    for (size_t i = 0; i < cur_sp_feats_.size(); ++i) {
+        cur_pts_.push_back(cur_sp_feats_[i].pt);
+        cur_ids_.push_back(pt_id_++);
+        tracked_times_.push_back(1);
+    }
+    
+    LOG(INFO) << "[SuperPoint] extracted " << cur_sp_feats_.size() << " features";
+}
+
+void FeatureTracker::matchLightGlue(const cv::Mat& img) {
+    if (!deep_net_ || !use_deep_features_) return;
+    
+    // 提取当前帧特征
+    cur_sp_feats_ = deep_net_->extractFeatures(img);
+    
+    if (prev_sp_feats_.empty()) {
+        // 第一帧，直接保存
+        prev_sp_feats_ = cur_sp_feats_;
+        cur_pts_.clear();
+        cur_ids_.clear();
+        tracked_times_.clear();
+        for (size_t i = 0; i < cur_sp_feats_.size(); ++i) {
+            cur_pts_.push_back(cur_sp_feats_[i].pt);
+            cur_ids_.push_back(pt_id_++);
+            tracked_times_.push_back(1);
+        }
+        return;
+    }
+    
+    // 使用LightGlue匹配
+    auto matches = deep_net_->matchFeatures(prev_sp_feats_, cur_sp_feats_, col_, row_);
+    
+    // 根据匹配结果更新追踪
+    vector<cv::Point2f> matched_prev_pts;
+    vector<cv::Point2f> matched_cur_pts;
+    vector<int> matched_ids;
+    vector<int> matched_track_cnt;
+    
+    for (const auto& match : matches) {
+        if (match.queryIdx < static_cast<int>(prev_pts.size()) && 
+            match.trainIdx < static_cast<int>(cur_sp_feats_.size())) {
+            matched_prev_pts.push_back(prev_pts[match.queryIdx]);
+            matched_cur_pts.push_back(cur_sp_feats_[match.trainIdx].pt);
+            
+            // 找到对应的ID
+            if (match.queryIdx < static_cast<int>(cur_ids_.size())) {
+                matched_ids.push_back(cur_ids_[match.queryIdx]);
+                matched_track_cnt.push_back(tracked_times_[match.queryIdx] + 1);
+            }
+        }
+    }
+    
+    // 更新当前帧信息
+    cur_pts_ = matched_cur_pts;
+    cur_ids_ = matched_ids;
+    tracked_times_ = matched_track_cnt;
+    
+    // 保存当前特征用于下一帧
+    prev_sp_feats_ = cur_sp_feats_;
+    
+    LOG(INFO) << "[LightGlue] matched " << matches.size() << " features";
+}
+
+void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {
+    if (!deep_net_ || !use_deep_features_) return;
+    
+    // 提取当前帧SuperPoint特征
+    cur_sp_feats_ = deep_net_->extractFeatures(img);
+    
+    if (prev_sp_feats_.empty() || prev_pts.empty()) {
+        // 第一帧或没有上一帧特征，直接保存
+        prev_sp_feats_ = cur_sp_feats_;
+        cur_pts_.clear();
+        cur_ids_.clear();
+        tracked_times_.clear();
+        for (size_t i = 0; i < cur_sp_feats_.size(); ++i) {
+            cur_pts_.push_back(cur_sp_feats_[i].pt);
+            cur_ids_.push_back(pt_id_++);
+            tracked_times_.push_back(1);
+        }
+        return;
+    }
+    
+    // 使用LK光流追踪SuperPoint特征
+    vector<cv::Point2f> prev_sp_pts;
+    for (const auto& f : prev_sp_feats_) {
+        prev_sp_pts.push_back(f.pt);
+    }
+    
+    vector<uchar> lk_status;
+    vector<float> lk_err;
+    vector<cv::Point2f> cur_sp_pts;
+    
+    cv::calcOpticalFlowPyrLK(prev_img, img, prev_sp_pts, cur_sp_pts,
+                              lk_status, lk_err, cv::Size(21, 21), 3);
+    
+    if (FLOW_BACK) {
+        vector<uchar> reverse_status;
+        vector<cv::Point2f> reverse_pts = prev_sp_pts;
+        cv::calcOpticalFlowPyrLK(img, prev_img, cur_sp_pts, reverse_pts,
+                                  reverse_status, lk_err, cv::Size(21, 21), 1,
+                                  cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01),
+                                  cv::OPTFLOW_USE_INITIAL_FLOW);
+        
+        for (size_t i = 0; i < lk_status.size(); i++) {
+            if (lk_status[i] && reverse_status[i] && 
+                distance(prev_sp_pts[i], reverse_pts[i]) <= 0.5) {
+                lk_status[i] = 1;
+            } else {
+                lk_status[i] = 0;
+            }
+        }
+    }
+    
+    // 检查边界
+    for (int i = 0; i < int(cur_sp_pts.size()); i++) {
+        if (lk_status[i] && !inBorder(cur_sp_pts[i])) {
+            lk_status[i] = 0;
+        }
+    }
+    
+    // 保留追踪成功的点
+    vector<cv::Point2f> tracked_pts;
+    vector<int> tracked_ids;
+    vector<int> tracked_cnt;
+    vector<dl::SpFeature> tracked_feats;
+    
+    for (size_t i = 0; i < lk_status.size(); i++) {
+        if (lk_status[i]) {
+            tracked_pts.push_back(cur_sp_pts[i]);
+            if (i < cur_ids_.size()) {
+                tracked_ids.push_back(cur_ids_[i]);
+                tracked_cnt.push_back(tracked_times_[i] + 1);
+            }
+            // 使用当前帧的SuperPoint描述子
+            if (i < cur_sp_feats_.size()) {
+                tracked_feats.push_back(cur_sp_feats_[i]);
+            }
+        }
+    }
+    
+    cur_pts_ = tracked_pts;
+    cur_ids_ = tracked_ids;
+    tracked_times_ = tracked_cnt;
+    
+    // 补充新的SuperPoint特征
+    int max_new = MAX_CNT - static_cast<int>(cur_pts_.size());
+    if (max_new > 0) {
+        // 使用MASK避免重复
+        setCurrFeatureAsMask();
+        
+        for (size_t i = 0; i < cur_sp_feats_.size() && max_new > 0; i++) {
+            cv::Point2f pt = cur_sp_feats_[i].pt;
+            if (pt.x >= 0 && pt.x < col_ && pt.y >= 0 && pt.y < row_) {
+                if (exist_pts_mask_.at<uchar>(pt) == 255) {
+                    cur_pts_.push_back(pt);
+                    cur_ids_.push_back(pt_id_++);
+                    tracked_times_.push_back(1);
+                    max_new--;
+                }
+            }
+        }
+    }
+    
+    prev_sp_feats_ = cur_sp_feats_;
+    
+    LOG(INFO) << "[SP+Flow] tracked " << tracked_pts.size() << " features, added " 
+              << (cur_pts_.size() - tracked_pts.size()) << " new";
 }
 
 

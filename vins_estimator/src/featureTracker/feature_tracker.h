@@ -26,6 +26,9 @@
 #include "../estimator/parameters.h"
 #include "../utility/tic_toc.h"
 
+// Deep learning feature support
+#include "../deep_net/superpoint_lightglue.h"
+
 using namespace std;
 using namespace Eigen;
 using namespace camodocal;
@@ -90,6 +93,22 @@ class FeatureTracker {
     // 判断像素是否位于图像内
     bool inBorder(const cv::Point2f &pt);
 
+    // ==================== SuperPoint + LightGlue 支持 ====================
+    
+    /// @brief 初始化深度学习模型
+    bool initDeepNet(const std::string& spEnginePath, 
+                     const std::string& lgEnginePath = "",
+                     int mode = 0);
+    
+    /// @brief 使用SuperPoint提取特征点（替代goodFeaturesToTrack）
+    void extractSuperPoint(const cv::Mat& img);
+    
+    /// @brief 使用LightGlue匹配特征点（替代LK光流）
+    void matchLightGlue(const cv::Mat& img);
+    
+    /// @brief 使用SuperPoint提取 + 光流追踪
+    void trackSuperPointFlow(const cv::Mat& img);
+
     // ************* 以下，我们按照各成员的含义和出现顺序，重新排列了它们，并给出注释 ************* //
 
     bool flag_stereo_cam_;                  //通过读入的相机内参的数量，自动判断是否为双目 
@@ -126,5 +145,14 @@ class FeatureTracker {
     map<int, cv::Point2f> cur_right_un_pts_map_, prev_right_un_pts_map_;    //同上，但对应特征点【在右目图像上的像素坐标(去畸变后的)】
     map<int, cv::Point2f> prev_pts_map_;                                    //当前帧处理完成后，保存特征点【在左目上的原始像素坐标】，用于绘制追踪结果以可视化
     cv::Mat img_track_show_;                                                //[原imTrack]绘制track结果到这个图像上，用于ui显示
+
+    // ==================== SuperPoint + LightGlue 成员 ====================
+    std::shared_ptr<dl::SuperPointLightGlue> deep_net_;  // 深度学习推理器
+    std::vector<dl::SpFeature> prev_sp_feats_;           // 上一帧SuperPoint特征
+    std::vector<dl::SpFeature> cur_sp_feats_;            // 当前帧SuperPoint特征
+    bool use_deep_features_;                             // 是否使用深度学习特征
+    int deep_feature_mode_;                              // 0: SP+光流, 1: SP+LightGlue
+    std::string sp_engine_path_;                         // SuperPoint引擎路径
+    std::string lg_engine_path_;                         // LightGlue引擎路径
 
 };

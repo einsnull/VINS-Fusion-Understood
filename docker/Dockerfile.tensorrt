@@ -1,0 +1,166 @@
+# VINS-Fusion with TensorRT support for SuperPoint + LightGlue
+# Based on NVIDIA CUDA image for GPU support
+
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV ROS_DISTRO=noetic
+ENV CATKIN_WS=/root/catkin_ws
+ENV CERES_VERSION="1.14.0"
+
+# Set up thread number for building
+RUN if [ "x$(nproc)" = "x1" ] ; then export USE_PROC=1 ; \
+    else export USE_PROC=$(($(nproc)/2)) ; fi
+
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    cmake \
+    build-essential \
+    libatlas-base-dev \
+    libeigen3-dev \
+    libgoogle-glog-dev \
+    libsuitesparse-dev \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-catkin-tools \
+    libglew-dev \
+    libpython3-dev \
+    libegl1-mesa-dev \
+    libwayland-dev \
+    libxkbcommon-dev \
+    wayland-protocols \
+    libgl1-mesa-dev \
+    libgl1-mesa-dri \
+    libglapi-mesa \
+    mesa-utils \
+    libx11-dev \
+    libx11-xcb1 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxcb-xinerama0 \
+    libxcb-xfixes0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ROS Noetic
+RUN sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list' && \
+    curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add - && \
+    apt-get update && apt-get install -y \
+    ros-${ROS_DISTRO}-desktop-full \
+    ros-${ROS_DISTRO}-cv-bridge \
+    ros-${ROS_DISTRO}-image-transport \
+    ros-${ROS_DISTRO}-message-filters \
+    ros-${ROS_DISTRO}-tf \
+    ros-${ROS_DISTRO}-rviz \
+    ros-${ROS_DISTRO}-pcl-ros \
+    python3-rosdep \
+    python3-rosinstall \
+    python3-rosinstall-generator \
+    python3-wstool \
+    && rm -rf /var/lib/apt/lists/*
+
+# Initialize rosdep
+RUN rosdep init || true && rosdep update || true
+
+# Install TensorRT
+# TensorRT 8.6 for CUDA 11.8
+RUN cd /tmp && \
+    wget https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/secure/8.6.1/tars/TensorRT-8.6.1.6.Linux.x86_64-gnu.cuda-11.8.tar.gz || \
+    echo "Please download TensorRT manually from https://developer.nvidia.com/tensorrt" && \
+    if [ -f TensorRT-8.6.1.6.Linux.x86_64-gnu.cuda-11.8.tar.gz ]; then \
+        tar -xzf TensorRT-8.6.1.6.Linux.x86_64-gnu.cuda-11.8.tar.gz && \
+        cp -r TensorRT-8.6.1.6/lib/* /usr/local/cuda/lib64/ && \
+        cp -r TensorRT-8.6.1.6/include/* /usr/local/cuda/include/ && \
+        rm -rf TensorRT-8.6.1.6* ; \
+    fi
+
+# Alternative: Install TensorRT via apt (if available)
+RUN apt-get update && apt-get install -y \
+    tensorrt \
+    libnvinfer8 \
+    libnvinfer-plugin8 \
+    libnvonnxparsers8 \
+    libnvparsers8 \
+    libnvinfer-bin \
+    libnvinfer-dev \
+    libnvinfer-plugin-dev \
+    libnvonnxparsers-dev \
+    libnvparsers-dev \
+    python3-libnvinfer \
+    || echo "TensorRT apt packages not available, will use manual installation"
+
+# Fix NVIDIA OpenGL symlinks for Pangolin
+RUN ln -sf /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0 /usr/lib/x86_64-linux-gnu/libGL.so || true && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0 /usr/lib/x86_64-linux-gnu/libGL.so.1 || true && \
+    ldconfig || true
+
+# Build and install gflags
+RUN git clone https://github.com/gflags/gflags.git && \
+    cd gflags && \
+    git checkout v2.2.2 && \
+    mkdir build && cd build && \
+    cmake .. -DBUILD_SHARED_LIBS=ON && \
+    make -j$(USE_PROC) install && \
+    cd / && rm -rf /gflags
+
+# Build and install Ceres
+RUN git clone https://github.com/ceres-solver/ceres-solver && \
+    cd ceres-solver && \
+    git checkout ${CERES_VERSION} && \
+    mkdir build && cd build && \
+    cmake .. && \
+    make -j$(USE_PROC) install && \
+    cd / && rm -rf /ceres-solver
+
+# Build and install Pangolin
+RUN git clone https://github.com/stevenlovegrove/Pangolin.git && \
+    cd Pangolin && \
+    git checkout v0.6 && \
+    mkdir build && cd build && \
+    cmake .. && \
+    make -j$(USE_PROC) install && \
+    cd / && rm -rf /Pangolin
+
+# Install Python dependencies for model conversion
+RUN pip3 install onnx onnxruntime-gpu
+
+# Copy model files and conversion script
+COPY models/ /tmp/models/
+COPY scripts/convert_onnx_to_trt.py /tmp/convert_onnx_to_trt.py
+
+# Convert ONNX models to TensorRT engines (will be done at runtime if needed)
+# RUN python3 /tmp/convert_onnx_to_trt.py
+
+RUN mkdir -p $CATKIN_WS/src/VINS-Fusion/
+
+# Copy VINS-Fusion
+COPY ./ $CATKIN_WS/src/VINS-Fusion/
+
+# Build VINS-Fusion with TensorRT support
+WORKDIR $CATKIN_WS
+ENV TERM=xterm
+ENV PYTHONIOENCODING=UTF-8
+
+# Source ROS and build
+RUN /bin/bash -c "source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    catkin config --extend /opt/ros/${ROS_DISTRO} --cmake-args \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DUSE_TENSORRT=ON && \
+    catkin build"
+
+# Set up entrypoint
+RUN sed -i '/exec "$@"/i \
+    source "/root/catkin_ws/devel/setup.bash"' /ros_entrypoint.sh || true
+
+# Copy entrypoint script
+COPY docker/start_vins.sh /start_vins.sh
+RUN chmod +x /start_vins.sh
+
+WORKDIR $CATKIN_WS
+CMD ["/bin/bash"]

@@ -47,6 +47,45 @@ if(${Pangolin_FOUND})
   add_definitions(-DUSE_PANGOLIN)
 endif()
 
+# ==================== TensorRT Support ====================
+option(USE_TENSORRT "Enable TensorRT for deep learning features" OFF)
+
+if(USE_TENSORRT)
+  find_package(CUDA QUIET)
+  if(CUDA_FOUND)
+    message(STATUS "## CUDA found: " ${CUDA_VERSION})
+    message(STATUS "## CUDA_INCLUDE_DIRS: " ${CUDA_INCLUDE_DIRS})
+    message(STATUS "## CUDA_LIBRARIES: " ${CUDA_LIBRARIES})
+    
+    # Find TensorRT
+    find_path(TENSORRT_INCLUDE_DIR NvInfer.h
+      HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+      PATH_SUFFIXES include)
+    find_library(TENSORRT_LIBRARY nvinfer
+      HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+      PATH_SUFFIXES lib lib64 lib/x64)
+    find_library(TENSORRT_ONNXPARSER_LIBRARY nvonnxparser
+      HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+      PATH_SUFFIXES lib lib64 lib/x64)
+    
+    if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY)
+      message(STATUS "## TensorRT found")
+      message(STATUS "## TENSORRT_INCLUDE_DIR: " ${TENSORRT_INCLUDE_DIR})
+      message(STATUS "## TENSORRT_LIBRARY: " ${TENSORRT_LIBRARY})
+      
+      include_directories(${CUDA_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR})
+      add_definitions(-DUSE_TENSORRT)
+      set(TENSORRT_LIBS ${TENSORRT_LIBRARY} ${TENSORRT_ONNXPARSER_LIBRARY} ${CUDA_LIBRARIES})
+    else()
+      message(WARNING "## TensorRT not found, disabling deep learning features")
+      set(USE_TENSORRT OFF)
+    endif()
+  else()
+    message(WARNING "## CUDA not found, disabling deep learning features")
+    set(USE_TENSORRT OFF)
+  endif()
+endif()
+
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
@@ -68,7 +107,7 @@ include_directories(
 
 catkin_package()
 
-add_library(vins_lib
+set(VINS_LIB_SOURCES
   src/estimator/parameters.cpp
   src/estimator/estimator.cpp
   src/estimator/feature_manager.cpp
@@ -89,6 +128,21 @@ add_library(vins_lib
   src/ui_pangolin/ui_window.cpp
 )
 
+if(USE_TENSORRT)
+  list(APPEND VINS_LIB_SOURCES
+    src/deep_net/trt_engine.cpp
+    src/deep_net/superpoint_lightglue.cpp
+  )
+  # Enable CUDA for deep_net files
+  set_source_files_properties(
+    src/deep_net/trt_engine.cpp
+    src/deep_net/superpoint_lightglue.cpp
+    PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ
+  )
+endif()
+
+add_library(vins_lib ${VINS_LIB_SOURCES})
+
 # if (${Pangolin_FOUND}) {
 #     add_library(vins_lib
 #       src/ui_pangolin/ui_window_impl.cpp
@@ -101,6 +155,7 @@ target_link_libraries(vins_lib
   ${OpenCV_LIBS} 
   ${CERES_LIBRARIES}
   ${Pangolin_LIBRARIES}
+  ${TENSORRT_LIBS}
 )
 
 

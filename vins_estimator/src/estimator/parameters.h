@@ -75,6 +75,14 @@ extern double F_THRESHOLD;  //用基础矩阵剔除outlier时的阈值（实际�
 extern int FLOW_BACK;       //是否启用反向追踪检验，通常是启用的
 extern int SHOW_TRACK;      //是否在独立opencv窗口中显示图像，用于debug
 
+// ==================== 深度学习特征参数 ====================
+extern int USE_DEEP_FEATURES;       //是否使用深度学习特征点 (0: 否, 1: 是)
+extern int DEEP_FEATURE_MODE;       //深度学习特征模式 (0: SuperPoint+光流, 1: SuperPoint+LightGlue)
+extern std::string SP_ENGINE_PATH;  //SuperPoint TensorRT引擎路径
+extern std::string LG_ENGINE_PATH;  //LightGlue TensorRT引擎路径
+extern int SP_INPUT_WIDTH;          //SuperPoint输入图像宽度
+extern int SP_INPUT_HEIGHT;         //SuperPoint输入图像高度
+
 extern std::map<int, Eigen::Vector3d> pts_gt;   //for debug purpose
 
 void readParameters(std::string config_file);
