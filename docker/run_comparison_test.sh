@@ -1,12 +1,15 @@
 #!/bin/bash
 # VINS-Fusion Comparison Test: Original vs SuperPoint+Optical Flow
+# Compiles code inside container, outputs results directly to host directory
 set -e
 set +H
 
 IMAGE="vins-fusion-superpoint:latest"
-DATASET_DIR="/storage/VINS-Fusion-Understood/dataset/machine_hall/MH_01_easy"
-RESULTS_DIR="/tmp/vins_comparison_$(date +%Y%m%d_%H%M%S)"
+PROJECT_DIR="/storage/VINS-Fusion-Understood"
+DATASET_DIR="${PROJECT_DIR}/dataset/machine_hall/MH_01_easy"
+HOST_OUTPUT_DIR="${PROJECT_DIR}/comparison_results"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+RESULTS_DIR="${HOST_OUTPUT_DIR}/${TIMESTAMP}"
 CONTAINER_ORIG="vins_orig_${TIMESTAMP}"
 CONTAINER_SP="vins_sp_${TIMESTAMP}"
 
@@ -17,7 +20,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 cleanup() {
-    echo -e "${YELLOW}Cleaning up...${NC}"
+    echo -e "${YELLOW}Cleaning up containers...${NC}"
     docker stop "$CONTAINER_ORIG" 2>/dev/null || true
     docker stop "$CONTAINER_SP" 2>/dev/null || true
 }
@@ -26,19 +29,19 @@ trap cleanup EXIT
 mkdir -p "$RESULTS_DIR/original" "$RESULTS_DIR/superpoint"
 xhost +local:docker 2>/dev/null || true
 
-DOCKER_OPTS="--net=host --gpus all -e DISPLAY=$DISPLAY -e QT_X11_NO_MITSHM=1 -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -v /tmp/.X11-unix:/tmp/.X11-unix -v $DATASET_DIR:/dataset:ro"
+DOCKER_OPTS="--net=host --gpus all -e DISPLAY=$DISPLAY -e QT_X11_NO_MITSHM=1 -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -v /tmp/.X11-unix:/tmp/.X11-unix -v $DATASET_DIR:/dataset:ro -v ${PROJECT_DIR}:/root/catkin_ws/src/VINS-Fusion"
 
 echo -e "${GREEN}=========================================${NC}"
 echo -e "${GREEN}VINS-Fusion Comparison Test${NC}"
 echo -e "${GREEN}  Original vs SuperPoint+Optical Flow${NC}"
 echo -e "${GREEN}=========================================${NC}"
-echo "Results: $RESULTS_DIR"
+echo -e "Host output: ${RESULTS_DIR}"
 echo ""
 
 run_test_in_container() {
     local CONTAINER_NAME="$1"
     local CONFIG_FILE="$2"
-    local OUTPUT_DIR="$3"
+    local HOST_OUTPUT_SUBDIR="$3"
     local TEST_NAME="$4"
 
     echo -e "${BLUE}=========================================${NC}"
@@ -46,22 +49,32 @@ run_test_in_container() {
     echo -e "${BLUE}=========================================${NC}"
 
     echo -e "${BLUE}[1] Starting container...${NC}"
-    docker run -d --rm --name "$CONTAINER_NAME" $DOCKER_OPTS -v "${OUTPUT_DIR}:/root/output" "$IMAGE" /bin/bash -c "while true; do sleep 3600; done"
+    docker run -d --rm --name "$CONTAINER_NAME" $DOCKER_OPTS \
+        -v "${HOST_OUTPUT_SUBDIR}:/root/output" \
+        "$IMAGE" /bin/bash -c "while true; do sleep 3600; done"
     echo -e "${GREEN}Container started: $CONTAINER_NAME${NC}"
 
-    echo -e "${BLUE}[2] Starting roscore...${NC}"
+    echo -e "${BLUE}[2] Compiling VINS-Fusion...${NC}"
+    docker exec "$CONTAINER_NAME" bash -c "
+        source /opt/ros/noetic/setup.bash
+        cd /root/catkin_ws
+        catkin build --no-status -DCMAKE_BUILD_TYPE=Release -DUSE_TENSORRT=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    "
+    echo -e "${GREEN}Compilation done${NC}"
+
+    echo -e "${BLUE}[3] Starting roscore...${NC}"
     docker exec -d "$CONTAINER_NAME" bash -c 'source /opt/ros/noetic/setup.bash && roscore > /tmp/roscore.log 2>&1'
     sleep 3
 
-    echo -e "${BLUE}[3] Starting VINS node...${NC}"
+    echo -e "${BLUE}[4] Starting VINS node...${NC}"
     docker exec -d "$CONTAINER_NAME" bash -c "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && mkdir -p /root/output && rosrun vins vins_node ${CONFIG_FILE} 1 > /tmp/vins.log 2>&1"
     sleep 8
 
-    echo -e "${BLUE}[4] Starting RViz...${NC}"
+    echo -e "${BLUE}[5] Starting RViz...${NC}"
     docker exec -d "$CONTAINER_NAME" bash -c 'source /opt/ros/noetic/setup.bash && sleep 3 && rviz -d /root/catkin_ws/src/VINS-Fusion/config/vins_rviz_config.rviz > /tmp/rviz.log 2>&1'
     sleep 5
 
-    echo -e "${BLUE}[5] Playing rosbag...${NC}"
+    echo -e "${BLUE}[6] Playing rosbag...${NC}"
     echo -e "${YELLOW}Pangolin + RViz should be visible now${NC}"
 
     docker exec "$CONTAINER_NAME" bash -c '
@@ -76,8 +89,9 @@ run_test_in_container() {
         sleep 2
     '
 
-    echo -e "${GREEN}${TEST_NAME} completed! Output: ${OUTPUT_DIR}${NC}"
-    ls -la "$OUTPUT_DIR" 2>/dev/null || true
+    echo -e "${GREEN}${TEST_NAME} completed!${NC}"
+    echo -e "Output files in: ${HOST_OUTPUT_SUBDIR}"
+    ls -la "$HOST_OUTPUT_SUBDIR" 2>/dev/null || true
 
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     sleep 3
@@ -95,20 +109,43 @@ run_test_in_container "$CONTAINER_SP" \
     "$RESULTS_DIR/superpoint" \
     "SuperPoint + Optical Flow (TensorRT)"
 
-# Summary
+# Run comparison analysis
+echo ""
+echo -e "${BLUE}=========================================${NC}"
+echo -e "${BLUE}  Running Trajectory Comparison Analysis${NC}"
+echo -e "${BLUE}=========================================${NC}"
+
+docker run --rm \
+    --net=host --gpus all \
+    -v "$RESULTS_DIR/original:/orig:ro" \
+    -v "$RESULTS_DIR/superpoint:/sp:ro" \
+    -v "$DATASET_DIR:/dataset:ro" \
+    -v "${PROJECT_DIR}/scripts:/scripts:ro" \
+    -v "$RESULTS_DIR:/output" \
+    "$IMAGE" \
+    bash -c 'source /opt/ros/noetic/setup.bash && python3 /scripts/compare_trajectories.py \
+        --gt /dataset/mav0/state_groundtruth_estimate0/data.csv \
+        --orig-bag /orig/trajectory.bag \
+        --orig-csv /orig/vio.csv \
+        --sp-bag /sp/trajectory.bag \
+        --sp-csv /sp/vio.csv \
+        --output-dir /output \
+        --rpe-delta 1.0'
+
 echo ""
 echo -e "${GREEN}=========================================${NC}"
 echo -e "${GREEN}  Comparison Test Complete!${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
-echo "Results:"
-echo "  Original:    $RESULTS_DIR/original/"
-echo "  SuperPoint:  $RESULTS_DIR/superpoint/"
+echo -e "All results saved to host directory:"
+echo -e "  ${RESULTS_DIR}/"
 echo ""
-echo "Files:"
-ls -la "$RESULTS_DIR/original/" 2>/dev/null || echo "  (empty)"
+echo -e "Contents:"
+ls -la "$RESULTS_DIR/" 2>/dev/null || true
 echo ""
-ls -la "$RESULTS_DIR/superpoint/" 2>/dev/null || echo "  (empty)"
+ls -la "$RESULTS_DIR/original/" 2>/dev/null || true
+echo ""
+ls -la "$RESULTS_DIR/superpoint/" 2>/dev/null || true
 echo ""
 
 if [ -f "$RESULTS_DIR/original/vio.csv" ] && [ -f "$RESULTS_DIR/superpoint/vio.csv" ]; then
