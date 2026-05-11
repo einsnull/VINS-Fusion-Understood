@@ -76,13 +76,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
     
     // ==================== 深度学习特征模式 ====================
     if (use_deep_features_) {
-        if (deep_feature_mode_ == 1) {
-            // SuperPoint + LightGlue匹配
-            matchLightGlue(cur_img);
-        } else {
-            // SuperPoint + 光流追踪
-            trackSuperPointFlow(cur_img);
-        }
+        trackSuperPointFlow(cur_img);
         
         // 继续处理双目和返回结果（与传统模式相同）
         // ... （后续代码与传统模式共享）
@@ -90,6 +84,22 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         // 当前帧左目图像特征点，去畸变&保存坐标，计算像素移动速度
         cur_un_pts = undistortedPts(cur_pts_, m_camera[0]);
         pts_velocity_ = ptsVelocity(cur_ids_, cur_un_pts, cur_un_pts_map_, prev_un_pts_map_);
+        
+        {
+            bool has_nan = false;
+            for (size_t i = 0; i < cur_un_pts.size() && i < 5; i++) {
+                if (!std::isfinite(cur_un_pts[i].x) || !std::isfinite(cur_un_pts[i].y)) {
+                    has_nan = true;
+                }
+            }
+            if (has_nan) {
+                LOG(ERROR) << "[Deep] NaN in undistorted points!";
+                for (size_t i = 0; i < std::min(cur_pts_.size(), (size_t)5); i++) {
+                    LOG(ERROR) << "  pt[" << i << "]: raw=(" << cur_pts_[i].x << "," << cur_pts_[i].y
+                              << ") un=(" << cur_un_pts[i].x << "," << cur_un_pts[i].y << ")";
+                }
+            }
+        }
         
         // 如果是双目方案，在【当前帧】的【左右图像】之间进行光流追踪
         if(!_img1.empty() && flag_stereo_cam_) {
@@ -419,6 +429,46 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         }
     }
 
+    {
+        double min_x = 1e9, max_x = -1e9, min_y = 1e9, max_y = -1e9;
+        double sum_x = 0, sum_y = 0;
+        int valid_cnt = 0;
+        for (size_t i = 0; i < cur_pts_.size(); i++) {
+            double x = cur_pts_[i].x, y = cur_pts_[i].y;
+            if (std::isfinite(x) && std::isfinite(y)) {
+                min_x = std::min(min_x, x); max_x = std::max(max_x, x);
+                min_y = std::min(min_y, y); max_y = std::max(max_y, y);
+                sum_x += x; sum_y += y;
+                valid_cnt++;
+            }
+        }
+        if (valid_cnt > 0) {
+            double mean_x = sum_x / valid_cnt, mean_y = sum_y / valid_cnt;
+            double var_x = 0, var_y = 0;
+            for (size_t i = 0; i < cur_pts_.size(); i++) {
+                double x = cur_pts_[i].x, y = cur_pts_[i].y;
+                if (std::isfinite(x) && std::isfinite(y)) {
+                    var_x += (x - mean_x) * (x - mean_x);
+                    var_y += (y - mean_y) * (y - mean_y);
+                }
+            }
+            var_x /= valid_cnt; var_y /= valid_cnt;
+            LOG(INFO) << "[FEAT-STAT] frame: cnt=" << valid_cnt
+                      << " raw_xy: min=(" << min_x << "," << min_y << ")"
+                      << " max=(" << max_x << "," << max_y << ")"
+                      << " mean=(" << mean_x << "," << mean_y << ")"
+                      << " std=(" << sqrt(var_x) << "," << sqrt(var_y) << ")"
+                      << " deep=" << (use_deep_features_ ? "SP" : "ORIG");
+            for (size_t i = 0; i < std::min((size_t)3, cur_pts_.size()); i++) {
+                LOG(INFO) << "[FEAT-DETAIL] feat[" << i << "]: raw=(" << cur_pts_[i].x << "," << cur_pts_[i].y
+                          << ") un=(" << cur_un_pts[i].x << "," << cur_un_pts[i].y << ")"
+                          << " id=" << cur_ids_[i] << " track_cnt=" << tracked_times_[i];
+            }
+        } else {
+            LOG(WARNING) << "[FEAT-STAT] frame: NO valid features! deep=" << (use_deep_features_ ? "SP" : "ORIG");
+        }
+    }
+
     //printf("feature tracking whole duration: %fms \n", track_timer.toc());
     return feats_frame;
 }
@@ -680,16 +730,14 @@ bool FeatureTracker::inBorder(const cv::Point2f &pt) {
 
 #ifdef USE_TENSORRT
 
-bool FeatureTracker::initDeepNet(const std::string& spEnginePath,
-                                  const std::string& lgEnginePath,
-                                  int mode) {
-    sp_engine_path_ = spEnginePath;
-    lg_engine_path_ = lgEnginePath;
+bool FeatureTracker::initDeepNet(const std::string& enginePath, int mode) {
+    fprintf(stderr, "[FT] initDeepNet: engine=%s, mode=%d\n", enginePath.c_str(), mode);
+    deep_engine_path_ = enginePath;
     deep_feature_mode_ = mode;
     
     deep_net_ = std::make_shared<dl::SuperPointLightGlue>();
     
-    if (!deep_net_->init(spEnginePath, lgEnginePath, mode)) {
+    if (!deep_net_->init(enginePath, mode)) {
         LOG(WARNING) << "Failed to initialize deep net, falling back to traditional features";
         use_deep_features_ = false;
         deep_net_.reset();
@@ -701,80 +749,6 @@ bool FeatureTracker::initDeepNet(const std::string& spEnginePath,
     return true;
 }
 
-void FeatureTracker::extractSuperPoint(const cv::Mat& img) {
-    if (!deep_net_ || !use_deep_features_) return;
-    
-    // 提取SuperPoint特征
-    cur_sp_feats_ = deep_net_->extractFeatures(img);
-    
-    // 转换为VINS格式
-    cur_pts_.clear();
-    cur_ids_.clear();
-    tracked_times_.clear();
-    
-    for (size_t i = 0; i < cur_sp_feats_.size(); ++i) {
-        cur_pts_.push_back(cur_sp_feats_[i].pt);
-        cur_ids_.push_back(pt_id_++);
-        tracked_times_.push_back(1);
-    }
-    
-    LOG(INFO) << "[SuperPoint] extracted " << cur_sp_feats_.size() << " features";
-}
-
-void FeatureTracker::matchLightGlue(const cv::Mat& img) {
-    if (!deep_net_ || !use_deep_features_) return;
-    
-    // 提取当前帧特征
-    cur_sp_feats_ = deep_net_->extractFeatures(img);
-    
-    if (prev_sp_feats_.empty()) {
-        // 第一帧，直接保存
-        prev_sp_feats_ = cur_sp_feats_;
-        cur_pts_.clear();
-        cur_ids_.clear();
-        tracked_times_.clear();
-        for (size_t i = 0; i < cur_sp_feats_.size(); ++i) {
-            cur_pts_.push_back(cur_sp_feats_[i].pt);
-            cur_ids_.push_back(pt_id_++);
-            tracked_times_.push_back(1);
-        }
-        return;
-    }
-    
-    // 使用LightGlue匹配
-    auto matches = deep_net_->matchFeatures(prev_sp_feats_, cur_sp_feats_, col_, row_);
-    
-    // 根据匹配结果更新追踪
-    vector<cv::Point2f> matched_prev_pts;
-    vector<cv::Point2f> matched_cur_pts;
-    vector<int> matched_ids;
-    vector<int> matched_track_cnt;
-    
-    for (const auto& match : matches) {
-        if (match.queryIdx < static_cast<int>(prev_pts.size()) && 
-            match.trainIdx < static_cast<int>(cur_sp_feats_.size())) {
-            matched_prev_pts.push_back(prev_pts[match.queryIdx]);
-            matched_cur_pts.push_back(cur_sp_feats_[match.trainIdx].pt);
-            
-            // 找到对应的ID
-            if (match.queryIdx < static_cast<int>(cur_ids_.size())) {
-                matched_ids.push_back(cur_ids_[match.queryIdx]);
-                matched_track_cnt.push_back(tracked_times_[match.queryIdx] + 1);
-            }
-        }
-    }
-    
-    // 更新当前帧信息
-    cur_pts_ = matched_cur_pts;
-    cur_ids_ = matched_ids;
-    tracked_times_ = matched_track_cnt;
-    
-    // 保存当前特征用于下一帧
-    prev_sp_feats_ = cur_sp_feats_;
-    
-    LOG(INFO) << "[LightGlue] matched " << matches.size() << " features";
-}
-
 void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {
     if (!deep_net_ || !use_deep_features_) return;
     
@@ -782,16 +756,27 @@ void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {
     cur_sp_feats_ = deep_net_->extractFeatures(img);
     
     if (prev_sp_feats_.empty() || prev_pts.empty()) {
-        // 第一帧或没有上一帧特征，直接保存
-        prev_sp_feats_ = cur_sp_feats_;
         cur_pts_.clear();
         cur_ids_.clear();
         tracked_times_.clear();
-        for (size_t i = 0; i < cur_sp_feats_.size(); ++i) {
-            cur_pts_.push_back(cur_sp_feats_[i].pt);
+        prev_sp_feats_.clear();
+        
+        int step = std::max(1, (int)cur_sp_feats_.size() / MAX_CNT);
+        int added = 0, skipped = 0;
+        for (size_t i = 0; i < cur_sp_feats_.size() && (int)cur_pts_.size() < MAX_CNT; i += step) {
+            cv::Point2f pt = cur_sp_feats_[i].pt;
+            if (pt.x < 0 || pt.x >= col_ || pt.y < 0 || pt.y >= row_) {
+                skipped++;
+                continue;
+            }
+            cur_pts_.push_back(pt);
             cur_ids_.push_back(pt_id_++);
             tracked_times_.push_back(1);
+            prev_sp_feats_.push_back(cur_sp_feats_[i]);
+            added++;
         }
+        LOG(INFO) << "[SP+Flow] First frame: added " << added << " features, skipped " 
+                  << skipped << " out-of-bounds, total extracted " << cur_sp_feats_.size();
         return;
     }
     
@@ -846,10 +831,6 @@ void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {
                 tracked_ids.push_back(cur_ids_[i]);
                 tracked_cnt.push_back(tracked_times_[i] + 1);
             }
-            // 使用当前帧的SuperPoint描述子
-            if (i < cur_sp_feats_.size()) {
-                tracked_feats.push_back(cur_sp_feats_[i]);
-            }
         }
     }
     
@@ -857,26 +838,40 @@ void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {
     cur_ids_ = tracked_ids;
     tracked_times_ = tracked_cnt;
     
+    // 为追踪成功的点找到对应的当前帧SuperPoint特征（用于下一帧匹配）
+    // 使用光流追踪后的位置，而不是重新提取的特征位置
+    prev_sp_feats_.clear();
+    for (size_t i = 0; i < cur_pts_.size(); i++) {
+        dl::SpFeature feat;
+        feat.pt = cur_pts_[i];
+        feat.pt_norm.x = (cur_pts_[i].x - col_/2.0) / std::max(col_, row_);
+        feat.pt_norm.y = (cur_pts_[i].y - row_/2.0) / std::max(col_, row_);
+        feat.score = 1.0;
+        prev_sp_feats_.push_back(feat);
+    }
+    
     // 补充新的SuperPoint特征
     int max_new = MAX_CNT - static_cast<int>(cur_pts_.size());
     if (max_new > 0) {
-        // 使用MASK避免重复
-        setCurrFeatureAsMask();
+        cv::Mat mask(row_, col_, CV_8UC1, cv::Scalar(255));
+        for (size_t i = 0; i < cur_pts_.size(); i++) {
+            cv::circle(mask, cur_pts_[i], MIN_DIST, 0, -1);
+        }
         
         for (size_t i = 0; i < cur_sp_feats_.size() && max_new > 0; i++) {
             cv::Point2f pt = cur_sp_feats_[i].pt;
             if (pt.x >= 0 && pt.x < col_ && pt.y >= 0 && pt.y < row_) {
-                if (exist_pts_mask_.at<uchar>(pt) == 255) {
+                if (mask.at<uchar>(pt) == 255) {
                     cur_pts_.push_back(pt);
                     cur_ids_.push_back(pt_id_++);
                     tracked_times_.push_back(1);
+                    prev_sp_feats_.push_back(cur_sp_feats_[i]);
+                    cv::circle(mask, pt, MIN_DIST, 0, -1);
                     max_new--;
                 }
             }
         }
     }
-    
-    prev_sp_feats_ = cur_sp_feats_;
     
     LOG(INFO) << "[SP+Flow] tracked " << tracked_pts.size() << " features, added " 
               << (cur_pts_.size() - tracked_pts.size()) << " new";
@@ -884,20 +879,10 @@ void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {
 
 #else // !USE_TENSORRT
 
-bool FeatureTracker::initDeepNet(const std::string& spEnginePath,
-                                  const std::string& lgEnginePath,
-                                  int mode) {
+bool FeatureTracker::initDeepNet(const std::string& enginePath, int mode) {
     LOG(WARNING) << "TensorRT not available, deep learning features disabled";
     use_deep_features_ = false;
     return false;
-}
-
-void FeatureTracker::extractSuperPoint(const cv::Mat& img) {
-    LOG(WARNING) << "SuperPoint not available, built without TensorRT";
-}
-
-void FeatureTracker::matchLightGlue(const cv::Mat& img) {
-    LOG(WARNING) << "LightGlue not available, built without TensorRT";
 }
 
 void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {

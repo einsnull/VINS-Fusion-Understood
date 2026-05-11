@@ -17,3 +17,25 @@ camera_chessboard_data.dat
 dataset/
 *.bag
 *.zip
+
+# Build artifacts
+build_host/
+devel_host/
+build/
+devel/
+
+# Model files (large binaries)
+models/*.pth
+models/*.onnx
+models/*.trt
+models/*.engine
+models/weights/
+
+# Docker large files
+docker/*.tar.gz
+
+# Test results
+comparison_results/
+
+# Third-party code
+LightGlue/

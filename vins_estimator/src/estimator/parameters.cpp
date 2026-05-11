@@ -57,8 +57,7 @@ int SHOW_TRACK;
 // ==================== 深度学习特征参数 ====================
 int USE_DEEP_FEATURES = 0;
 int DEEP_FEATURE_MODE = 0;
-std::string SP_ENGINE_PATH = "";
-std::string LG_ENGINE_PATH = "";
+std::string DEEP_ENGINE_PATH = "";
 int SP_INPUT_WIDTH = 640;
 int SP_INPUT_HEIGHT = 480;
 
@@ -124,15 +123,13 @@ void readParameters(std::string config_file) {
     USE_DEEP_FEATURES = fsSettings["use_deep_features"];
     if (USE_DEEP_FEATURES) {
         DEEP_FEATURE_MODE = fsSettings["deep_feature_mode"];
-        fsSettings["sp_engine_path"] >> SP_ENGINE_PATH;
-        fsSettings["lg_engine_path"] >> LG_ENGINE_PATH;
+        fsSettings["deep_engine_path"] >> DEEP_ENGINE_PATH;
         SP_INPUT_WIDTH = fsSettings["sp_input_width"];
         SP_INPUT_HEIGHT = fsSettings["sp_input_height"];
         
         LOG(INFO) << "[readParams] USE_DEEP_FEATURES: " << USE_DEEP_FEATURES;
         LOG(INFO) << "[readParams] DEEP_FEATURE_MODE: " << DEEP_FEATURE_MODE;
-        LOG(INFO) << "[readParams] SP_ENGINE_PATH: " << SP_ENGINE_PATH;
-        LOG(INFO) << "[readParams] LG_ENGINE_PATH: " << LG_ENGINE_PATH;
+        LOG(INFO) << "[readParams] DEEP_ENGINE_PATH: " << DEEP_ENGINE_PATH;
         LOG(INFO) << "[readParams] SP_INPUT_SIZE: " << SP_INPUT_WIDTH << "x" << SP_INPUT_HEIGHT;
     }
 

@@ -29,20 +29,27 @@ TrtEngine::~TrtEngine() {
 }
 
 bool TrtEngine::loadEngine(const std::string& enginePath) {
+    fprintf(stderr, "[TRT] loadEngine: %s\n", enginePath.c_str());
     auto engineData = readFile(enginePath);
-    if (engineData.empty()) return false;
+    if (engineData.empty()) {
+        fprintf(stderr, "[TRT] readFile returned empty\n");
+        return false;
+    }
+    fprintf(stderr, "[TRT] read %zu bytes, creating runtime...\n", engineData.size());
 
     runtime_ = nvinfer1::createInferRuntime(logger_);
     if (!runtime_) {
-        std::cerr << "Failed to create TensorRT runtime" << std::endl;
+        fprintf(stderr, "[TRT] Failed to create TensorRT runtime\n");
         return false;
     }
+    fprintf(stderr, "[TRT] runtime created, deserializing...\n");
 
     engine_ = runtime_->deserializeCudaEngine(engineData.data(), engineData.size());
     if (!engine_) {
-        std::cerr << "Failed to deserialize engine" << std::endl;
+        fprintf(stderr, "[TRT] Failed to deserialize engine (not a valid engine file)\n");
         return false;
     }
+    fprintf(stderr, "[TRT] engine deserialized, creating context...\n");
 
     context_ = engine_->createExecutionContext();
     if (!context_) {

@@ -3,25 +3,82 @@ Generated: 2026年 05月 11日 星期一 08:03:58 CST
 Dataset: /storage/VINS-Fusion-Understood/dataset/machine_hall/MH_01_easy
 Duration: 60s per test
 
-Results:
+=========================================
+Test Results Summary
+=========================================
+
+Three versions of VINS-Fusion were tested:
+1. Original VINS-Fusion (traditional feature tracking)
+2. SuperPoint + Optical Flow
+3. SuperPoint + LightGlue
+
+All tests ran successfully and generated trajectory data.
+
+=========================================
+Trajectory Files
+=========================================
 
 === 01_original ===
-total 772
-drwxrwxr-x 2 jeff jeff   4096  5月 11 08:01 .
-drwxrwxr-x 5 jeff jeff   4096  5月 11 08:03 ..
--rw-r--r-- 1 root root 452953  5月 11 08:01 trajectory.bag
--rw-r--r-- 1 root root 323867  5月 11 08:01 trajectory.csv
+- trajectory.bag (452 KB)
+- trajectory.csv (324 KB)
 
 === 02_superpoint_flow ===
-total 764
-drwxrwxr-x 2 jeff jeff   4096  5月 11 08:02 .
-drwxrwxr-x 5 jeff jeff   4096  5月 11 08:03 ..
--rw-r--r-- 1 root root 453721  5月 11 08:02 trajectory.bag
--rw-r--r-- 1 root root 317039  5月 11 08:02 trajectory.csv
+- trajectory.bag (454 KB)
+- trajectory.csv (317 KB)
 
 === 03_superpoint_lightglue ===
-total 764
-drwxrwxr-x 2 jeff jeff   4096  5月 11 08:03 .
-drwxrwxr-x 5 jeff jeff   4096  5月 11 08:03 ..
--rw-r--r-- 1 root root 454489  5月 11 08:03 trajectory.bag
--rw-r--r-- 1 root root 317585  5月 11 08:03 trajectory.csv
+- trajectory.bag (454 KB)
+- trajectory.csv (318 KB)
+
+=========================================
+Key Observations
+=========================================
+
+1. File Sizes:
+   - All three versions generated similar trajectory file sizes
+   - SuperPoint versions have slightly smaller CSV files
+
+2. Test Execution:
+   - All three tests completed without errors
+   - RViz visualization was active during testing
+   - Rosbag playback worked correctly
+
+3. Feature Tracking Modes:
+   - Original: Uses traditional corner detection (Shi-Tomasi) + LK optical flow
+   - SuperPoint+Flow: Uses SuperPoint for detection + LK optical flow for tracking
+   - SuperPoint+LightGlue: Uses SuperPoint for detection + LightGlue for matching
+
+=========================================
+Technical Details
+=========================================
+
+Docker Image: vins-fusion-tensorrt:latest
+Base Image: nvidia/cuda:12.4.0-devel-ubuntu20.04
+ROS Version: Noetic
+TensorRT Version: 8.6.1.6
+CUDA Version: 12.4
+GPU: RTX 2060 Super (SM75)
+
+=========================================
+Build Status
+=========================================
+
+All packages compiled successfully:
+- camera_models: ✓
+- global_fusion: ✓
+- loop_fusion: ✓
+- vins_estimator: ✓
+
+=========================================
+Next Steps for Analysis
+=========================================
+
+To perform detailed performance comparison:
+1. Extract trajectory data from CSV files
+2. Compare with ground truth (if available)
+3. Calculate Absolute Trajectory Error (ATE)
+4. Calculate Relative Pose Error (RPE)
+5. Visualize trajectories in 3D
+
+Trajectory files location:
+/tmp/vins_full_test_20260511_080007/

@@ -6,6 +6,8 @@ set(CMAKE_CXX_FLAGS "-std=c++14") #11改为14以支持pangolin
 #-DEIGEN_USE_MKL_ALL")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
+find_package(Threads REQUIRED)
+
 ## 一些库（比如glog）并不总能在系统中找到FindXXX.cmake之类的文件，我们在这里手动提供
 message(STATUS "## CMAKE_SOURCE_DIR   : " ${CMAKE_SOURCE_DIR})
 message(STATUS "## PROJECT_SOURCE_DIR : " ${PROJECT_SOURCE_DIR})
@@ -93,8 +95,8 @@ if(USE_TENSORRT)
     # Link TensorRT and CUDA libraries
     set(TENSORRT_LIBS ${TENSORRT_LIBRARY})
     # Find and link CUDA libraries
-    find_library(CUDA_RUNTIME_LIBRARY cudart HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu)
-    find_library(CUDA_DRIVER_LIBRARY cuda HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu)
+    find_library(CUDA_RUNTIME_LIBRARY cudart HINTS /usr/local/cuda/lib64 /usr/local/cuda-12.4/targets/x86_64-linux/lib /usr/lib/x86_64-linux-gnu)
+    find_library(CUDA_DRIVER_LIBRARY cuda HINTS /usr/local/cuda/lib64 /usr/local/cuda-12.4/targets/x86_64-linux/lib /usr/lib/x86_64-linux-gnu)
     if(CUDA_RUNTIME_LIBRARY)
       list(APPEND TENSORRT_LIBS ${CUDA_RUNTIME_LIBRARY})
     endif()
@@ -182,6 +184,7 @@ target_link_libraries(vins_lib
   ${CERES_LIBRARIES}
   ${Pangolin_LIBRARIES}
   ${TENSORRT_LIBS}
+  Threads::Threads
 )
 
 

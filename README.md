@@ -4,6 +4,61 @@ Welcome to **VINS-Fusion-Understood**: A fully understandable version of VINS-Fu
 
 欢迎来到 **VINS-Fusion-Understood**，一个人人可懂的VINS-Fusion版本。
 
+---
+
+## SuperPoint + TensorRT 集成 (NEW)
+
+本分支在 VINS-Fusion-Understood 基础上集成了 **SuperPoint 深度学习特征提取**，使用 TensorRT 进行 GPU 加速推理。
+
+### 特性
+- **SuperPoint 特征提取**: 使用官方 SuperPoint 模型，通过 TensorRT 加速，替代原有的 Shi-Tomasi 角点
+- **光流追踪**: SuperPoint 特征点 + LK 光流追踪（与原版流程一致，仅替换特征提取器）
+- **Docker 一键运行**: 完整的 Docker 环境，包含 CUDA 12.4 + TensorRT 8.6 + ROS Noetic
+- **可视化**: Pangolin UI + RViz 实时显示
+
+### 快速开始
+
+```bash
+# 1. 构建 Docker 镜像
+cd docker
+docker build -t vins-fusion-superpoint:latest .
+
+# 2. 运行可视化测试（SuperPoint + 光流）
+./run_visual_test.sh
+
+# 3. 或使用原始特征运行
+./run_comparison_visual.sh
+```
+
+### 配置说明
+
+在 config yaml 中启用深度学习特征:
+```yaml
+use_deep_features: 1      # 1: 启用 SuperPoint
+deep_feature_mode: 0      # 0: SuperPoint + 光流
+deep_engine_path: "/models/superpoint_official.trt"
+```
+
+### 文件结构
+```
+vins_estimator/src/deep_net/     # TensorRT 推理封装
+  ├── trt_engine.h/cpp           # TensorRT 引擎封装
+  ├── superpoint_lightglue.h/cpp # SuperPoint 特征提取
+config/euroc/
+  └── euroc_mono_imu_config_deep.yaml  # 深度学习配置文件
+docker/
+  ├── Dockerfile                 # 合并后的 Dockerfile
+  ├── run_visual_test.sh         # 可视化测试脚本
+  └── TensorRT-8.6.1.6...tar.gz  # TensorRT 安装包
+models/
+  └── superpoint_official.trt    # SuperPoint TensorRT 引擎
+scripts/
+  ├── export_official_models.py  # ONNX 导出脚本
+  └── convert_onnx_to_trt.py     # ONNX -> TensorRT 转换
+```
+
+---
+
 在这里，我们对[原版VINS-Fusion](https://github.com/HKUST-Aerial-Robotics/VINS-Fusion)的代码风格进行了重构，不仅包括【1】一些必要的Google风格变量重命名/缩进/大括号位置调整，更重要的是，【2】我们按照含义聚类和逻辑顺序重新排列了几乎所有的成员函数和数据成员，【3】并添加了详尽的、经得起推敲的注释，尤其是**三个主要类、以及滑窗优化、边缘化**等部分。由此，我们希望VINS-Fusion-Understood能够做到代码即文档——让读代码就像读文档一样轻松。此外，【4】我们还在VINS算法中剥离了所有的ROS代码，【5】并引入了glog作为日志工具，以方便调试和保存日志文件。这些改动都有助于您将VINS方便地移植到其它通信框架或计算平台上。【6】为了便于理解VINS，我们还引入了ui窗口以绘制VINS系统内部的状态信息，使VINS可视化。以上所有重构工作，您都可以从本仓库的代码中看到。您也可以从下方的动图中对VINS-Fusion-Understood的代码风格和注释内容窥见一二。
 
 更详细的介绍，您可以前往中文博客查看：[【知乎】VINS-Fusion-Understood：完全可理解的VINS-Fusion，靠谱注释+工程重构版](https://zhuanlan.zhihu.com/p/674861674)

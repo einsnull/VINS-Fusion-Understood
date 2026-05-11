@@ -122,7 +122,7 @@ void VinsEstimator::setParameter() {
     // Initialize deep learning features if enabled
     if (USE_DEEP_FEATURES) {
         LOG(INFO) << "[Params] Initializing deep learning features...";
-        bool init_success = f_tracker_.initDeepNet(SP_ENGINE_PATH, LG_ENGINE_PATH, DEEP_FEATURE_MODE);
+        bool init_success = f_tracker_.initDeepNet(DEEP_ENGINE_PATH, DEEP_FEATURE_MODE);
         if (!init_success) {
             LOG(WARNING) << "[Params] Failed to initialize deep learning features, falling back to traditional features";
             USE_DEEP_FEATURES = 0;  // Disable deep features if initialization fails
@@ -837,6 +837,34 @@ void VinsEstimator::runOptimization() {
     TicToc t_whole_optimz, t_prepare_optimz;
     StateToCeresParam();
 
+    {
+        bool has_nan = false;
+        for (int i = 0; i <= WINDOW_SIZE; i++) {
+            for (int j = 0; j < SIZE_POSE; j++) {
+                if (!std::isfinite(para_Pose_[i][j])) { has_nan = true; break; }
+            }
+            if (USE_IMU) {
+                for (int j = 0; j < SIZE_SPEEDBIAS; j++) {
+                    if (!std::isfinite(para_Speed_Bias_[i][j])) { has_nan = true; break; }
+                }
+            }
+        }
+        int feat_cnt = f_manager_.getRobustFeatureCount();
+        for (int i = 0; i < feat_cnt; i++) {
+            if (!std::isfinite(para_Features_[i][0])) { has_nan = true; break; }
+        }
+        if (has_nan) {
+            LOG(ERROR) << "[Optimization] NaN detected in initial state! frame_count=" << frame_count;
+            for (int i = 0; i <= WINDOW_SIZE; i++) {
+                LOG(ERROR) << "  P[" << i << "]: " << Ps[i].transpose();
+                LOG(ERROR) << "  V[" << i << "]: " << Vs[i].transpose();
+            }
+            for (int i = 0; i < std::min(10, feat_cnt); i++) {
+                LOG(ERROR) << "  feat[" << i << "] inv_depth: " << para_Features_[i][0];
+            }
+        }
+    }
+
     // 优化问题对象
     ceres::Problem problem;
 
@@ -984,6 +1012,24 @@ void VinsEstimator::runOptimization() {
 
     TicToc t_ceres_solve;
     ceres::Solver::Summary summary;
+
+    class NaNCallback : public ceres::IterationCallback {
+     public:
+        int frame_cnt;
+        explicit NaNCallback(int fc) : frame_cnt(fc) {}
+        ceres::CallbackReturnType operator()(const ceres::IterationSummary& summary) override {
+            if (summary.step_is_valid) {
+                LOG(INFO) << "[Ceres] iter " << summary.iteration
+                          << " cost=" << summary.cost
+                          << " grad=" << summary.gradient_norm
+                          << " step=" << summary.step_norm;
+            }
+            return ceres::SOLVER_CONTINUE;
+        }
+    };
+    NaNCallback nan_cb(frame_count);
+    options.callbacks.push_back(&nan_cb);
+    options.update_state_every_iteration = false;
     ceres::Solve(options, &problem, &summary);
     // LOG(INFO) << summary.BriefReport();
     // printf("[ DBG ] Iterations : %d \n", static_cast<int>(summary.iterations.size()));

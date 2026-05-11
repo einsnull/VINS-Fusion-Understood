@@ -1,83 +1,114 @@
 #!/bin/bash
-# 运行VINS-Fusion并确保可视化正常工作
-
+# VINS-Fusion 可视化测试 - 单容器方案
+# Pangolin + RViz 都在同一个容器中，共享 ROS master
 set -e
 
-# 获取配置参数
-CONFIG=${1:-"config/euroc/euroc_stereo_imu_config.yaml"}
-IMAGE=${2:-"ros:vins-fusion"}
-TEST_NAME=${3:-"vins_vis"}
+IMAGE="vins-fusion-superpoint:latest"
+DATASET_DIR="/storage/VINS-Fusion-Understood/dataset/machine_hall/MH_01_easy"
+RESULTS_DIR="/tmp/vins_visual_$(date +%Y%m%d_%H%M%S)"
+CONTAINER_NAME="vins_visual_$(date +%Y%m%d_%H%M%S)"
 
-echo "========================================="
-echo "运行VINS-Fusion with Visualization"
-echo "========================================="
-echo "Config: $CONFIG"
-echo "Image: $IMAGE"
-echo ""
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-# 确保X11权限
+cleanup() {
+    echo -e "${YELLOW}Cleaning up...${NC}"
+    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+mkdir -p "$RESULTS_DIR"
 xhost +local:docker 2>/dev/null || true
 
-# 检查DISPLAY
-if [ -z "$DISPLAY" ]; then
-    export DISPLAY=:1
-fi
-echo "Using DISPLAY=$DISPLAY"
+echo -e "${GREEN}=========================================${NC}"
+echo -e "${GREEN}VINS-Fusion Visual Test${NC}"
+echo -e "${GREEN}=========================================${NC}"
+echo "Container: $CONTAINER_NAME"
+echo "Results: $RESULTS_DIR"
+echo ""
 
-# 获取绝对路径
-VINS_DIR=$(cd "$(dirname "$0")/.." && pwd)
-
-# 创建结果目录
-mkdir -p "$VINS_DIR/output"
-
-# 运行Docker容器，包含所有可视化支持
-docker run -it --rm \
-    --name "$TEST_NAME" \
+# Step 1: Start persistent container
+echo -e "${BLUE}[1/5] Starting persistent container...${NC}"
+docker run -d --rm \
+    --name "$CONTAINER_NAME" \
     --net=host \
     --gpus all \
-    --privileged \
     -e DISPLAY=$DISPLAY \
     -e QT_X11_NO_MITSHM=1 \
     -e NVIDIA_VISIBLE_DEVICES=all \
     -e NVIDIA_DRIVER_CAPABILITIES=all \
-    -e LIBGL_ALWAYS_SOFTWARE=1 \
-    -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-    -v "$VINS_DIR:/root/catkin_ws/src/VINS-Fusion" \
-    -v "$VINS_DIR/output:/root/output" \
-    "$IMAGE" \
-    /bin/bash -c "
-        # 设置NVIDIA GL库
-        mv /usr/lib/x86_64-linux-gnu/mesa /usr/lib/x86_64-linux-gnu/mesa.bak 2>/dev/null || true
-        ln -sf /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0 /usr/lib/x86_64-linux-gnu/libGL.so 2>/dev/null || true
-        ln -sf /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0 /usr/lib/x86_64-linux-gnu/libGL.so.1 2>/dev/null || true
-        ldconfig 2>/dev/null || true
-        
-        source /opt/ros/kinetic/setup.bash
-        source /root/catkin_ws/devel/setup.bash
-        
-        # 启动roscore
-        roscore &
-        sleep 3
-        
-        echo '启动VINS节点（带UI）...'
-        # 使用UI选项1启用Pangolin
-        rosrun vins vins_node /root/catkin_ws/src/VINS-Fusion/$CONFIG 1 &
-        VINS_PID=\$!
-        
-        sleep 5
-        
-        # 检查VINS是否运行
-        if ! kill -0 \$VINS_PID 2>/dev/null; then
-            echo '错误: VINS节点未能启动'
-            exit 1
-        fi
-        
-        echo 'VINS节点已启动，PID: '\$VINS_PID
-        echo 'Pangolin应该正在显示...'
-        echo '按Ctrl+C停止'
-        
-        # 保持运行
-        wait \$VINS_PID
-    "
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -v "$DATASET_DIR:/dataset:ro" \
+    -v "$RESULTS_DIR:/root/output" \
+    $IMAGE \
+    /bin/bash -c "while true; do sleep 3600; done"
 
-echo "容器已停止"
+echo -e "${GREEN}Container started: $CONTAINER_NAME${NC}"
+
+# Step 2: Start roscore
+echo -e "${BLUE}[2/5] Starting roscore...${NC}"
+docker exec -d "$CONTAINER_NAME" /bin/bash -c "
+    source /opt/ros/noetic/setup.bash
+    roscore > /tmp/roscore.log 2>&1
+"
+sleep 3
+echo -e "${GREEN}roscore started${NC}"
+
+# Step 3: Start VINS node (with Pangolin UI)
+echo -e "${BLUE}[3/5] Starting VINS node (Pangolin UI)...${NC}"
+docker exec -d "$CONTAINER_NAME" /bin/bash -c "
+    source /opt/ros/noetic/setup.bash
+    source /root/catkin_ws/devel/setup.bash
+    mkdir -p /root/output
+    rosrun vins vins_node /root/catkin_ws/src/VINS-Fusion/config/euroc/euroc_mono_imu_config_deep.yaml 1 > /tmp/vins.log 2>&1
+"
+sleep 8
+echo -e "${GREEN}VINS node started (Pangolin window should appear)${NC}"
+
+# Step 4: Start RViz
+echo -e "${BLUE}[4/5] Starting RViz...${NC}"
+docker exec -d "$CONTAINER_NAME" /bin/bash -c "
+    source /opt/ros/noetic/setup.bash
+    sleep 3
+    rviz -d /root/catkin_ws/src/VINS-Fusion/config/vins_rviz_config.rviz > /tmp/rviz.log 2>&1
+"
+sleep 5
+echo -e "${GREEN}RViz started${NC}"
+
+# Step 5: Play rosbag
+echo -e "${BLUE}[5/5] Playing rosbag...${NC}"
+echo -e "${YELLOW}=========================================${NC}"
+echo -e "${YELLOW}Visualization is now running!${NC}"
+echo -e "${YELLOW}  Pangolin: VINS feature tracks + pose${NC}"
+echo -e "${YELLOW}  RViz: trajectory path + feature image${NC}"
+echo -e "${YELLOW}=========================================${NC}"
+echo ""
+
+docker exec "$CONTAINER_NAME" /bin/bash -c "
+    source /opt/ros/noetic/setup.bash
+    source /root/catkin_ws/devel/setup.bash
+    
+    rosbag record -O /root/output/trajectory.bag /vins_estimator/odometry /feature_tracker/feature &
+    RECORD_PID=\$!
+    sleep 2
+    
+    rosbag play /dataset/MH_01_easy.bag --clock -r 1
+    
+    sleep 5
+    kill \$RECORD_PID 2>/dev/null || true
+    sleep 2
+    echo 'BAG_PLAY_DONE'
+"
+
+echo ""
+echo -e "${GREEN}=========================================${NC}"
+echo -e "${GREEN}Test completed!${NC}"
+echo -e "${GREEN}Results: $RESULTS_DIR${NC}"
+echo -e "${GREEN}=========================================${NC}"
+ls -la "$RESULTS_DIR" 2>/dev/null
+
+echo ""
+echo -e "${YELLOW}Container will be cleaned up automatically.${NC}"

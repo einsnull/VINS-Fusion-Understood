@@ -95,18 +95,10 @@ class FeatureTracker {
     // 判断像素是否位于图像内
     bool inBorder(const cv::Point2f &pt);
 
-    // ==================== SuperPoint + LightGlue 支持 ====================
+    // ==================== SuperPoint 支持 ====================
     
-    /// @brief 初始化深度学习模型
-    bool initDeepNet(const std::string& spEnginePath, 
-                     const std::string& lgEnginePath = "",
-                     int mode = 0);
-    
-    /// @brief 使用SuperPoint提取特征点（替代goodFeaturesToTrack）
-    void extractSuperPoint(const cv::Mat& img);
-    
-    /// @brief 使用LightGlue匹配特征点（替代LK光流）
-    void matchLightGlue(const cv::Mat& img);
+    /// @brief 初始化深度学习模型 (SuperPoint引擎)
+    bool initDeepNet(const std::string& enginePath, int mode = 0);
     
     /// @brief 使用SuperPoint提取 + 光流追踪
     void trackSuperPointFlow(const cv::Mat& img);
@@ -153,10 +145,10 @@ class FeatureTracker {
     std::shared_ptr<dl::SuperPointLightGlue> deep_net_;  // 深度学习推理器
     std::vector<dl::SpFeature> prev_sp_feats_;           // 上一帧SuperPoint特征
     std::vector<dl::SpFeature> cur_sp_feats_;            // 当前帧SuperPoint特征
+    cv::Mat prev_img_;                                   // 上一帧图像 (LightGlue模式用)
 #endif
     bool use_deep_features_;                             // 是否使用深度学习特征
     int deep_feature_mode_;                              // 0: SP+光流, 1: SP+LightGlue
-    std::string sp_engine_path_;                         // SuperPoint引擎路径
-    std::string lg_engine_path_;                         // LightGlue引擎路径
+    std::string deep_engine_path_;                       // 端到端引擎路径
 
 };

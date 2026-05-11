@@ -15,7 +15,6 @@ except ImportError:
     print("Error: TensorRT not installed. Please install TensorRT first.")
     sys.exit(1)
 
-import pycuda.driver as cuda
 import numpy as np
 
 
