@@ -1,0 +1,27 @@
+VINS-Fusion Comparison Report
+Generated: 2026年 05月 11日 星期一 08:03:58 CST
+Dataset: /storage/VINS-Fusion-Understood/dataset/machine_hall/MH_01_easy
+Duration: 60s per test
+
+Results:
+
+=== 01_original ===
+total 772
+drwxrwxr-x 2 jeff jeff   4096  5月 11 08:01 .
+drwxrwxr-x 5 jeff jeff   4096  5月 11 08:03 ..
+-rw-r--r-- 1 root root 452953  5月 11 08:01 trajectory.bag
+-rw-r--r-- 1 root root 323867  5月 11 08:01 trajectory.csv
+
+=== 02_superpoint_flow ===
+total 764
+drwxrwxr-x 2 jeff jeff   4096  5月 11 08:02 .
+drwxrwxr-x 5 jeff jeff   4096  5月 11 08:03 ..
+-rw-r--r-- 1 root root 453721  5月 11 08:02 trajectory.bag
+-rw-r--r-- 1 root root 317039  5月 11 08:02 trajectory.csv
+
+=== 03_superpoint_lightglue ===
+total 764
+drwxrwxr-x 2 jeff jeff   4096  5月 11 08:03 .
+drwxrwxr-x 5 jeff jeff   4096  5月 11 08:03 ..
+-rw-r--r-- 1 root root 454489  5月 11 08:03 trajectory.bag
+-rw-r--r-- 1 root root 317585  5月 11 08:03 trajectory.csv
