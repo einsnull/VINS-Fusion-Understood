@@ -49,13 +49,64 @@ config/euroc/
 docker/
   ├── Dockerfile                 # 合并后的 Dockerfile
   ├── run_visual_test.sh         # 可视化测试脚本
+  ├── run_comparison_test.sh     # 对比测试脚本（原始 vs SuperPoint）
   └── TensorRT-8.6.1.6...tar.gz  # TensorRT 安装包
 models/
   └── superpoint_official.trt    # SuperPoint TensorRT 引擎
 scripts/
   ├── export_official_models.py  # ONNX 导出脚本
-  └── convert_onnx_to_trt.py     # ONNX -> TensorRT 转换
+  ├── convert_onnx_to_trt.py     # ONNX -> TensorRT 转换
+  └── compare_trajectories.py    # 轨迹对比分析（ATE/RPE/3D可视化）
 ```
+
+### 对比测试：原始版 vs SuperPoint
+
+一键运行对比测试，自动完成编译、运行、轨迹分析，结果输出到宿主机目录：
+
+```bash
+# 前置条件：已构建 Docker 镜像
+cd docker
+docker build -t vins-fusion-superpoint:latest .
+
+# 运行对比测试（需要 X11 显示，约 6 分钟）
+./run_comparison_test.sh
+```
+
+测试流程：
+1. 在容器内编译最新代码
+2. 运行**原始版**（Shi-Tomasi + LK 光流）→ 输出 vio.csv + trajectory.bag
+3. 运行 **SuperPoint 版**（SuperPoint + LK 光流）→ 输出 vio.csv + trajectory.bag
+4. 自动计算 ATE / RPE，生成 3D 轨迹对比图和误差柱状图
+
+结果输出到：`/storage/VINS-Fusion-Understood/comparison_results/<时间戳>/`
+
+```
+comparison_results/<时间戳>/
+├── original/
+│   ├── vio.csv           # 原始版轨迹（含纳秒时间戳）
+│   └── trajectory.bag    # ROS bag
+├── superpoint/
+│   ├── vio.csv           # SuperPoint 版轨迹（含纳秒时间戳）
+│   └── trajectory.bag    # ROS bag
+├── trajectory_3d.png     # 3D 轨迹对比图
+└── ate_comparison.png    # ATE 指标对比柱状图
+```
+
+### 评测指标说明
+
+| 指标 | 含义 |
+|------|------|
+| ATE (Absolute Trajectory Error) | 绝对轨迹误差，Umeyama 对齐后计算 RMSE |
+| RPE (Relative Pose Error) | 相对位姿误差，固定时间间隔（默认 1s）的位移误差 |
+
+### 测试结果（MH_01_easy）
+
+| 指标 | Original (Shi-Tomasi) | SuperPoint + Optical Flow |
+|------|----------------------|--------------------------|
+| ATE RMSE | 4.1284 m | 4.1221 m |
+| ATE Mean | 3.7709 m | 3.7605 m |
+| RPE RMSE | 0.8709 m | 0.8721 m |
+| 匹配帧数 | 1819 | 1819 |
 
 ---
 
