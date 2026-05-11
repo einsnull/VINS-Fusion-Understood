@@ -1,6 +1,7 @@
 #!/bin/bash
 # VINS-Fusion Comparison Test: Original vs SuperPoint+Optical Flow
 set -e
+set +H
 
 IMAGE="vins-fusion-superpoint:latest"
 DATASET_DIR="/storage/VINS-Fusion-Understood/dataset/machine_hall/MH_01_easy"
@@ -75,7 +76,7 @@ run_test_in_container() {
         sleep 2
     '
 
-    echo -e "${GREEN}${TEST_NAME} completed!${NC}"
+    echo -e "${GREEN}${TEST_NAME} completed! Output: ${OUTPUT_DIR}${NC}"
     ls -la "$OUTPUT_DIR" 2>/dev/null || true
 
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
