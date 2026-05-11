@@ -41,16 +41,16 @@ show_track: 1           # publish tracking image as topic
 flow_back: 1            # perform forward and backward optical flow to improve feature tracking accuracy
 
 #======================== Deep Learning Feature Parameters ========================
-# Enable deep learning features (SuperPoint + LightGlue)
+# Enable deep learning features (SuperPoint + LightGlue pipeline)
 use_deep_features: 1    # 0: disable, 1: enable SuperPoint features
 
 # Deep feature mode:
 # 0: SuperPoint feature extraction + Optical Flow tracking (faster, suitable for real-time)
 # 1: SuperPoint feature extraction + LightGlue matching (more accurate, slower)
-deep_feature_mode: 0
+deep_feature_mode: 1
 
-# TensorRT engine path (SuperPoint feature extractor)
-deep_engine_path: "/models/superpoint_official.trt"
+# TensorRT engine path (SuperPoint + LightGlue pipeline engine)
+deep_engine_path: "/models/superpoint_lightglue_pipeline_trt.engine"
 
 # SuperPoint standalone engine path (used for first-frame extraction in LightGlue mode)
 sp_engine_path: "/models/superpoint_official.trt"

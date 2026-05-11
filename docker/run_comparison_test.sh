@@ -1,5 +1,5 @@
 #!/bin/bash
-# VINS-Fusion Comparison Test: Original vs SuperPoint+Optical Flow
+# VINS-Fusion Comparison Test: Original vs SuperPoint+Optical Flow vs SuperPoint+LightGlue
 # Compiles code inside container, outputs results directly to host directory
 set -e
 set +H
@@ -11,7 +11,8 @@ HOST_OUTPUT_DIR="${PROJECT_DIR}/comparison_results"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 RESULTS_DIR="${HOST_OUTPUT_DIR}/${TIMESTAMP}"
 CONTAINER_ORIG="vins_orig_${TIMESTAMP}"
-CONTAINER_SP="vins_sp_${TIMESTAMP}"
+CONTAINER_SP_FLOW="vins_spflow_${TIMESTAMP}"
+CONTAINER_SP_LG="vins_splg_${TIMESTAMP}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -22,18 +23,19 @@ NC='\033[0m'
 cleanup() {
     echo -e "${YELLOW}Cleaning up containers...${NC}"
     docker stop "$CONTAINER_ORIG" 2>/dev/null || true
-    docker stop "$CONTAINER_SP" 2>/dev/null || true
+    docker stop "$CONTAINER_SP_FLOW" 2>/dev/null || true
+    docker stop "$CONTAINER_SP_LG" 2>/dev/null || true
 }
 trap cleanup EXIT
 
-mkdir -p "$RESULTS_DIR/original" "$RESULTS_DIR/superpoint"
+mkdir -p "$RESULTS_DIR/original" "$RESULTS_DIR/superpoint_flow" "$RESULTS_DIR/superpoint_lightglue"
 xhost +local:docker 2>/dev/null || true
 
 DOCKER_OPTS="--net=host --gpus all -e DISPLAY=$DISPLAY -e QT_X11_NO_MITSHM=1 -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -v /tmp/.X11-unix:/tmp/.X11-unix -v $DATASET_DIR:/dataset:ro -v ${PROJECT_DIR}:/root/catkin_ws/src/VINS-Fusion"
 
 echo -e "${GREEN}=========================================${NC}"
 echo -e "${GREEN}VINS-Fusion Comparison Test${NC}"
-echo -e "${GREEN}  Original vs SuperPoint+Optical Flow${NC}"
+echo -e "${GREEN}  Original vs SuperPoint+Flow vs SuperPoint+LightGlue${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo -e "Host output: ${RESULTS_DIR}"
 echo ""
@@ -104,10 +106,16 @@ run_test_in_container "$CONTAINER_ORIG" \
     "Original VINS-Fusion (Shi-Tomasi + LK Flow)"
 
 # Test 2: SuperPoint + Optical Flow
-run_test_in_container "$CONTAINER_SP" \
+run_test_in_container "$CONTAINER_SP_FLOW" \
     "/root/catkin_ws/src/VINS-Fusion/config/euroc/euroc_mono_imu_config_deep.yaml" \
-    "$RESULTS_DIR/superpoint" \
+    "$RESULTS_DIR/superpoint_flow" \
     "SuperPoint + Optical Flow (TensorRT)"
+
+# Test 3: SuperPoint + LightGlue
+run_test_in_container "$CONTAINER_SP_LG" \
+    "/root/catkin_ws/src/VINS-Fusion/config/euroc/euroc_mono_imu_config_lightglue.yaml" \
+    "$RESULTS_DIR/superpoint_lightglue" \
+    "SuperPoint + LightGlue (TensorRT Pipeline)"
 
 # Run comparison analysis
 echo ""
@@ -118,7 +126,8 @@ echo -e "${BLUE}=========================================${NC}"
 docker run --rm \
     --net=host --gpus all \
     -v "$RESULTS_DIR/original:/orig:ro" \
-    -v "$RESULTS_DIR/superpoint:/sp:ro" \
+    -v "$RESULTS_DIR/superpoint_flow:/sp:ro" \
+    -v "$RESULTS_DIR/superpoint_lightglue:/splg:ro" \
     -v "$DATASET_DIR:/dataset:ro" \
     -v "${PROJECT_DIR}/scripts:/scripts:ro" \
     -v "$RESULTS_DIR:/output" \
@@ -129,6 +138,8 @@ docker run --rm \
         --orig-csv /orig/vio.csv \
         --sp-bag /sp/trajectory.bag \
         --sp-csv /sp/vio.csv \
+        --splg-bag /splg/trajectory.bag \
+        --splg-csv /splg/vio.csv \
         --output-dir /output \
         --rpe-delta 1.0'
 
@@ -143,15 +154,21 @@ echo ""
 echo -e "Contents:"
 ls -la "$RESULTS_DIR/" 2>/dev/null || true
 echo ""
+echo -e "${BLUE}Original:${NC}"
 ls -la "$RESULTS_DIR/original/" 2>/dev/null || true
 echo ""
-ls -la "$RESULTS_DIR/superpoint/" 2>/dev/null || true
+echo -e "${BLUE}SuperPoint+Flow:${NC}"
+ls -la "$RESULTS_DIR/superpoint_flow/" 2>/dev/null || true
+echo ""
+echo -e "${BLUE}SuperPoint+LightGlue:${NC}"
+ls -la "$RESULTS_DIR/superpoint_lightglue/" 2>/dev/null || true
 echo ""
 
-if [ -f "$RESULTS_DIR/original/vio.csv" ] && [ -f "$RESULTS_DIR/superpoint/vio.csv" ]; then
+if [ -f "$RESULTS_DIR/original/vio.csv" ] && [ -f "$RESULTS_DIR/superpoint_flow/vio.csv" ] && [ -f "$RESULTS_DIR/superpoint_lightglue/vio.csv" ]; then
     echo -e "${BLUE}VIO CSV comparison:${NC}"
-    echo "  Original lines:   $(wc -l < "$RESULTS_DIR/original/vio.csv")"
-    echo "  SuperPoint lines: $(wc -l < "$RESULTS_DIR/superpoint/vio.csv")"
+    echo "  Original lines:            $(wc -l < "$RESULTS_DIR/original/vio.csv")"
+    echo "  SuperPoint+Flow lines:     $(wc -l < "$RESULTS_DIR/superpoint_flow/vio.csv")"
+    echo "  SuperPoint+LightGlue lines: $(wc -l < "$RESULTS_DIR/superpoint_lightglue/vio.csv")"
 fi
 
 echo ""

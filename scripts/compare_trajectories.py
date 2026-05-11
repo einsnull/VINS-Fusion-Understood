@@ -208,8 +208,8 @@ def plot_trajectories_3d(gt, results, output_path):
     ax1 = fig.add_subplot(121, projection='3d')
     ax1.plot(gt[:, 1], gt[:, 2], gt[:, 3], 'k-', linewidth=0.5, alpha=0.5, label='Ground Truth')
 
-    colors = {'original': 'blue', 'superpoint': 'red'}
-    labels = {'original': 'Original (Shi-Tomasi)', 'superpoint': 'SuperPoint+Flow'}
+    colors = {'original': 'blue', 'superpoint': 'red', 'superpoint_lightglue': 'green'}
+    labels = {'original': 'Original (Shi-Tomasi)', 'superpoint': 'SuperPoint+Flow', 'superpoint_lightglue': 'SuperPoint+LightGlue'}
 
     for name, result in results.items():
         if result is not None and 'aligned' in result:
@@ -246,15 +246,15 @@ def plot_error_comparison(results, output_path):
         return
 
     names = list(results.keys())
-    if len(names) < 2:
+    if len(names) < 1:
         return
 
     metrics = ['rmse', 'mean', 'median', 'std', 'max']
     x = np.arange(len(metrics))
-    width = 0.35
+    width = 0.25
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    colors = ['blue', 'red']
+    colors = ['blue', 'red', 'green']
 
     for i, name in enumerate(names):
         if results[name] is not None:
@@ -309,6 +309,10 @@ def main():
                         help='Original VINS vio.csv (optional)')
     parser.add_argument('--sp-csv', default='/sp/vio.csv',
                         help='SuperPoint VINS vio.csv')
+    parser.add_argument('--splg-bag', default='/splg/trajectory.bag',
+                        help='SuperPoint+LightGlue VINS trajectory bag')
+    parser.add_argument('--splg-csv', default='/splg/vio.csv',
+                        help='SuperPoint+LightGlue VINS vio.csv')
     parser.add_argument('--output-dir', default='/output',
                         help='Output directory for plots')
     parser.add_argument('--rpe-delta', type=float, default=1.0,
@@ -319,7 +323,7 @@ def main():
 
     print("=" * 60)
     print("VINS-Fusion Trajectory Comparison")
-    print("  Original (Shi-Tomasi) vs SuperPoint+Optical Flow")
+    print("  Original (Shi-Tomasi) vs SuperPoint+Flow vs SuperPoint+LightGlue")
     print("=" * 60)
 
     gt = load_ground_truth(args.gt)
@@ -336,6 +340,7 @@ def main():
     for label, bag_path, csv_path in [
         ('original', args.orig_bag, args.orig_csv),
         ('superpoint', args.sp_bag, args.sp_csv),
+        ('superpoint_lightglue', args.splg_bag, args.splg_csv),
     ]:
         est = None
         source = "none"

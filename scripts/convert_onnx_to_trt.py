@@ -1,8 +1,57 @@
 #!/usr/bin/env python3
 """
 Convert ONNX models to TensorRT engines for SuperPoint and LightGlue.
-Usage:
-    python3 convert_onnx_to_trt.py --onnx /path/to/model.onnx --output /path/to/model.engine --fp16
+
+This script supports three model types used in VINS-Fusion:
+
+1. SuperPoint (feature extraction only):
+   - Source: https://github.com/fabio-sim/SuperPoint-ONNX
+   - Model: superpoint_v1.onnx (or superpoint_official.onnx)
+   - Input:  image [1, 1, H, W]  (grayscale, H=W=480 recommended)
+   - Output: keypoints [1, N, 2] (x,y), scores [1, N], descriptors [1, 256, N]
+   - Usage: python3 convert_onnx_to_trt.py --onnx superpoint_v1.onnx --output superpoint.trt --fp16
+
+2. SuperPoint+LightGlue (fused, feature extraction + matching):
+   - Source: https://github.com/fabio-sim/LightGlue-ONNX
+   - Model: superpoint_lightglue_fused.onnx
+   - Input:  image0 [1, 1, H, W], image1 [1, 1, H, W]  (two grayscale images)
+   - Output: matches0 [M], matches1 [M], mscores0 [M]
+   - Usage: python3 convert_onnx_to_trt.py --onnx superpoint_lightglue_fused.onnx --output superpoint_lightglue_fused.trt --fp16
+
+3. SuperPoint+LightGlue (pipeline, separate feature extraction + matching):
+   - Source: https://github.com/fabio-sim/LightGlue-ONNX
+   - Model: superpoint_lightglue_pipeline.onnx (exported with extractor_type='superpoint')
+   - Input:  keypoints0 [1, N, 2], scores0 [1, N], descriptors0 [1, 256, N],
+            keypoints1 [1, M, 2], scores1 [1, M], descriptors1 [1, 256, M]
+   - Output: matches0 [P], matches1 [P], mscores0 [P]
+   - Note: This model requires pre-extracted SuperPoint features as input.
+           In VINS-Fusion, this is used with a separate SuperPoint engine for
+           first-frame extraction, then the pipeline model for matching.
+   - Usage: python3 convert_onnx_to_trt.py --onnx superpoint_lightglue_pipeline.onnx --output superpoint_lightglue_pipeline.trt --fp16
+
+Model Download:
+   git clone https://github.com/fabio-sim/LightGlue-ONNX.git /tmp/LightGlue-ONNX
+   # The ONNX models are in the weights/ directory
+
+Conversion Examples:
+   # SuperPoint only
+   python3 convert_onnx_to_trt.py --onnx superpoint_v1.onnx --output superpoint.trt --fp16
+
+   # SuperPoint+LightGlue fused (end-to-end)
+   python3 convert_onnx_to_trt.py --onnx superpoint_lightglue_fused.onnx --output superpoint_lightglue_fused.trt --fp16
+
+   # SuperPoint+LightGlue pipeline (separate extraction + matching)
+   python3 convert_onnx_to_trt.py --onnx superpoint_lightglue_pipeline.onnx --output superpoint_lightglue_pipeline.trt --fp16
+
+VINS-Fusion Integration:
+   - Place converted .trt/.engine files in the models/ directory
+   - Configure paths in config/euroc/euroc_mono_imu_config_lightglue.yaml
+   - The pipeline model requires both a SuperPoint engine (for first frame)
+     and a LightGlue pipeline engine (for matching)
+
+Reference:
+   - LightGlue-ONNX: https://github.com/fabio-sim/LightGlue-ONNX
+   - D_VINS (TensorRT integration reference): https://github.com/kajo-kurisu/D_VINS
 """
 
 import argparse

@@ -117,6 +117,24 @@ ENV CUDA_MODULE_LOADING=LAZY
 COPY models/ /models/
 COPY scripts/convert_onnx_to_trt.py /scripts/convert_onnx_to_trt.py
 
+# Download LightGlue-ONNX models and convert to TensorRT
+RUN mkdir -p /tmp/LightGlue-ONNX && \
+    cd /tmp/LightGlue-ONNX && \
+    git clone https://github.com/fabio-sim/LightGlue-ONNX.git . && \
+    cp weights/superpoint_lightglue_pipeline.onnx /models/ && \
+    cp weights/superpoint_lightglue_fused.onnx /models/ && \
+    cd / && rm -rf /tmp/LightGlue-ONNX
+
+# Convert ONNX models to TensorRT engines
+RUN python3 /scripts/convert_onnx_to_trt.py \
+    --onnx /models/superpoint_lightglue_pipeline.onnx \
+    --output /models/superpoint_lightglue_pipeline_trt.engine \
+    --fp16 && \
+    python3 /scripts/convert_onnx_to_trt.py \
+    --onnx /models/superpoint_lightglue_fused.onnx \
+    --output /models/superpoint_lightglue_fused_trt.engine \
+    --fp16
+
 # Copy VINS-Fusion source
 RUN rm -rf $CATKIN_WS/src/VINS-Fusion/*
 COPY ./ $CATKIN_WS/src/VINS-Fusion/

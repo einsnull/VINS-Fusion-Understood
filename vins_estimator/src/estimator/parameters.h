@@ -79,6 +79,7 @@ extern int SHOW_TRACK;      //是否在独立opencv窗口中显示图像，用�
 extern int USE_DEEP_FEATURES;       //是否使用深度学习特征点 (0: 否, 1: 是)
 extern int DEEP_FEATURE_MODE;       //深度学习特征模式 (0: SuperPoint+光流, 1: SuperPoint+LightGlue)
 extern std::string DEEP_ENGINE_PATH;  //端到端TensorRT引擎路径
+extern std::string SP_ENGINE_PATH;    //SuperPoint单独引擎路径 (LightGlue模式首帧提取用)
 extern int SP_INPUT_WIDTH;          //SuperPoint输入图像宽度
 extern int SP_INPUT_HEIGHT;         //SuperPoint输入图像高度
 

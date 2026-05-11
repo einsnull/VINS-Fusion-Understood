@@ -59,8 +59,16 @@ bool TrtEngine::loadEngine(const std::string& enginePath) {
 
     cudaStreamCreate(&stream_);
 
-    numInputs_ = engine_->getNbBindings();
-    // 注意：TensorRT 8+ 使用 getNbIOTensors，这里简化处理
+    numInputs_ = 0;
+    numOutputs_ = 0;
+    for (int i = 0; i < engine_->getNbBindings(); ++i) {
+        if (engine_->bindingIsInput(i)) {
+            numInputs_++;
+        } else {
+            numOutputs_++;
+        }
+    }
+
     for (int i = 0; i < engine_->getNbBindings(); ++i) {
         auto dims = engine_->getBindingDimensions(i);
         std::vector<int> dimVec;
@@ -195,6 +203,23 @@ std::vector<int> TrtEngine::getOutputDims(int index) {
     return outputDims_[index];
 }
 
+std::vector<int> TrtEngine::getActualBindingDims(int bindingIndex) {
+    if (!context_ || !engine_) return {};
+    if (bindingIndex < 0 || bindingIndex >= engine_->getNbBindings()) return {};
+    auto dims = context_->getBindingDimensions(bindingIndex);
+    std::vector<int> result;
+    for (int j = 0; j < dims.nbDims; ++j) {
+        result.push_back(dims.d[j]);
+    }
+    return result;
+}
+
+bool TrtEngine::isInput(int bindingIndex) const {
+    if (!engine_) return false;
+    if (bindingIndex < 0 || bindingIndex >= engine_->getNbBindings()) return false;
+    return engine_->bindingIsInput(bindingIndex);
+}
+
 std::string TrtEngine::getInputName(int index) {
     if (index < 0 || index >= static_cast<int>(inputNames_.size())) return "";
     return inputNames_[index];
@@ -239,7 +264,11 @@ void TrtEngine::synchronize() {
 size_t TrtEngine::volume(const std::vector<int>& dims) {
     size_t vol = 1;
     for (auto d : dims) {
-        if (d > 0) vol *= d;
+        if (d < 0) {
+            vol *= 2048;
+        } else {
+            vol *= d;
+        }
     }
     return vol;
 }

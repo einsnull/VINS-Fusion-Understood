@@ -11,6 +11,8 @@
 
 #include "feature_tracker.h"
 
+#include <set>
+
 namespace {
 
 // double distance(cv::Point2f pt1, cv::Point2f pt2) {
@@ -76,7 +78,11 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
     
     // ==================== 深度学习特征模式 ====================
     if (use_deep_features_) {
-        trackSuperPointFlow(cur_img);
+        if (deep_feature_mode_ == 1) {
+            trackSuperPointLightGlue(cur_img);
+        } else {
+            trackSuperPointFlow(cur_img);
+        }
         
         // 继续处理双目和返回结果（与传统模式相同）
         // ... （后续代码与传统模式共享）
@@ -730,14 +736,15 @@ bool FeatureTracker::inBorder(const cv::Point2f &pt) {
 
 #ifdef USE_TENSORRT
 
-bool FeatureTracker::initDeepNet(const std::string& enginePath, int mode) {
-    fprintf(stderr, "[FT] initDeepNet: engine=%s, mode=%d\n", enginePath.c_str(), mode);
+bool FeatureTracker::initDeepNet(const std::string& enginePath, int mode, const std::string& spEnginePath) {
+    fprintf(stderr, "[FT] initDeepNet: engine=%s, mode=%d, spEngine=%s\n",
+            enginePath.c_str(), mode, spEnginePath.c_str());
     deep_engine_path_ = enginePath;
     deep_feature_mode_ = mode;
     
     deep_net_ = std::make_shared<dl::SuperPointLightGlue>();
     
-    if (!deep_net_->init(enginePath, mode)) {
+    if (!deep_net_->init(enginePath, mode, spEnginePath)) {
         LOG(WARNING) << "Failed to initialize deep net, falling back to traditional features";
         use_deep_features_ = false;
         deep_net_.reset();
@@ -877,9 +884,130 @@ void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {
               << (cur_pts_.size() - tracked_pts.size()) << " new";
 }
 
+void FeatureTracker::trackSuperPointLightGlue(const cv::Mat& img) {
+    if (!deep_net_ || !use_deep_features_) return;
+
+    if (prev_img_.empty() || prev_pts.empty()) {
+        cur_sp_feats_ = deep_net_->extractFeatures(img);
+
+        cur_pts_.clear();
+        cur_ids_.clear();
+        tracked_times_.clear();
+
+        int step = std::max(1, (int)cur_sp_feats_.size() / MAX_CNT);
+        int added = 0, skipped = 0;
+        for (size_t i = 0; i < cur_sp_feats_.size() && (int)cur_pts_.size() < MAX_CNT; i += step) {
+            cv::Point2f pt = cur_sp_feats_[i].pt;
+            if (pt.x < 0 || pt.x >= col_ || pt.y < 0 || pt.y >= row_) {
+                skipped++;
+                continue;
+            }
+            cur_pts_.push_back(pt);
+            cur_ids_.push_back(pt_id_++);
+            tracked_times_.push_back(1);
+            added++;
+        }
+
+        prev_img_ = img.clone();
+        prev_sp_feats_ = cur_sp_feats_;
+        prev_ids_ = cur_ids_;
+        prev_tracked_times_ = tracked_times_;
+
+        LOG(INFO) << "[SP+LG] First frame: added " << added << " features, total extracted "
+                  << cur_sp_feats_.size();
+        return;
+    }
+
+    dl::MatchResult matchResult = deep_net_->matchFeatures(prev_img_, img);
+
+    cur_pts_.clear();
+    cur_ids_.clear();
+    tracked_times_.clear();
+
+    std::vector<dl::SpFeature> matchedPrevFeats;
+    std::vector<dl::SpFeature> matchedCurFeats;
+
+    std::vector<int> queryToPrevId(matchResult.features0.size(), -1);
+    for (size_t qi = 0; qi < matchResult.features0.size(); ++qi) {
+        float qx = matchResult.features0[qi].pt.x;
+        float qy = matchResult.features0[qi].pt.y;
+        float bestDist = 9.0f;
+        int bestIdx = -1;
+        for (size_t pi = 0; pi < prev_sp_feats_.size(); ++pi) {
+            float dx = qx - prev_sp_feats_[pi].pt.x;
+            float dy = qy - prev_sp_feats_[pi].pt.y;
+            float dist = dx * dx + dy * dy;
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestIdx = pi;
+            }
+        }
+        if (bestIdx >= 0 && bestIdx < (int)prev_ids_.size()) {
+            queryToPrevId[qi] = prev_ids_[bestIdx];
+        }
+    }
+
+    std::set<int> usedIds;
+
+    int n_bad_query = 0, n_bad_train = 0, n_bad_border = 0;
+    for (const auto& m : matchResult.matches) {
+        if (m.queryIdx < 0 || m.queryIdx >= (int)matchResult.features0.size()) { n_bad_query++; continue; }
+        if (m.trainIdx < 0 || m.trainIdx >= (int)matchResult.features1.size()) { n_bad_train++; continue; }
+
+        cv::Point2f pt = matchResult.features1[m.trainIdx].pt;
+        if (!inBorder(pt)) { n_bad_border++; continue; }
+
+        cur_pts_.push_back(pt);
+
+        int featId = queryToPrevId[m.queryIdx];
+        if (featId < 0 || usedIds.count(featId)) {
+            featId = pt_id_++;
+        }
+        usedIds.insert(featId);
+
+        cur_ids_.push_back(featId);
+        tracked_times_.push_back(1);
+
+        matchedPrevFeats.push_back(matchResult.features0[m.queryIdx]);
+        matchedCurFeats.push_back(matchResult.features1[m.trainIdx]);
+    }
+
+    int max_new = MAX_CNT - static_cast<int>(cur_pts_.size());
+    if (max_new > 0) {
+        cv::Mat mask(row_, col_, CV_8UC1, cv::Scalar(255));
+        for (size_t i = 0; i < cur_pts_.size(); i++) {
+            cv::circle(mask, cur_pts_[i], MIN_DIST, 0, -1);
+        }
+
+        for (size_t i = 0; i < matchResult.features1.size() && max_new > 0; i++) {
+            cv::Point2f pt = matchResult.features1[i].pt;
+            if (pt.x >= 0 && pt.x < col_ && pt.y >= 0 && pt.y < row_) {
+                if (mask.at<uchar>(pt) == 255) {
+                    cur_pts_.push_back(pt);
+                    cur_ids_.push_back(pt_id_++);
+                    tracked_times_.push_back(1);
+                    matchedCurFeats.push_back(matchResult.features1[i]);
+                    cv::circle(mask, pt, MIN_DIST, 0, -1);
+                    max_new--;
+                }
+            }
+        }
+    }
+
+    prev_img_ = img.clone();
+    prev_sp_feats_ = matchedCurFeats;
+    prev_ids_ = cur_ids_;
+    prev_tracked_times_ = tracked_times_;
+
+    LOG(INFO) << "[SP+LG] matched " << matchResult.matches.size() << " pairs, "
+              << "tracked " << cur_pts_.size() << " features"
+              << " (bad_query=" << n_bad_query << " bad_train=" << n_bad_train
+              << " bad_border=" << n_bad_border << ")";
+}
+
 #else // !USE_TENSORRT
 
-bool FeatureTracker::initDeepNet(const std::string& enginePath, int mode) {
+bool FeatureTracker::initDeepNet(const std::string& enginePath, int mode, const std::string& spEnginePath) {
     LOG(WARNING) << "TensorRT not available, deep learning features disabled";
     use_deep_features_ = false;
     return false;
@@ -887,6 +1015,10 @@ bool FeatureTracker::initDeepNet(const std::string& enginePath, int mode) {
 
 void FeatureTracker::trackSuperPointFlow(const cv::Mat& img) {
     LOG(WARNING) << "SuperPoint+Flow not available, built without TensorRT";
+}
+
+void FeatureTracker::trackSuperPointLightGlue(const cv::Mat& img) {
+    LOG(WARNING) << "SuperPoint+LightGlue not available, built without TensorRT";
 }
 
 #endif // USE_TENSORRT

@@ -36,6 +36,9 @@ public:
     // 获取输入/输出维度
     std::vector<int> getInputDims(int index = 0);
     std::vector<int> getOutputDims(int index = 0);
+
+    /// @brief 获取推理后的实际binding维度（处理动态shape）
+    std::vector<int> getActualBindingDims(int bindingIndex);
     
     // 获取输入/输出名称
     std::string getInputName(int index = 0);
@@ -52,6 +55,8 @@ public:
 
     int getNumInputs() const { return numInputs_; }
     int getNumOutputs() const { return numOutputs_; }
+    int getNumBindings() const { return numInputs_ + numOutputs_; }
+    bool isInput(int bindingIndex) const;
 
 private:
     TrtLogger logger_;

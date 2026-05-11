@@ -122,7 +122,7 @@ void VinsEstimator::setParameter() {
     // Initialize deep learning features if enabled
     if (USE_DEEP_FEATURES) {
         LOG(INFO) << "[Params] Initializing deep learning features...";
-        bool init_success = f_tracker_.initDeepNet(DEEP_ENGINE_PATH, DEEP_FEATURE_MODE);
+        bool init_success = f_tracker_.initDeepNet(DEEP_ENGINE_PATH, DEEP_FEATURE_MODE, SP_ENGINE_PATH);
         if (!init_success) {
             LOG(WARNING) << "[Params] Failed to initialize deep learning features, falling back to traditional features";
             USE_DEEP_FEATURES = 0;  // Disable deep features if initialization fails
@@ -436,9 +436,6 @@ void VinsEstimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<d
      * 
     */
 
-    LOG(INFO) << "[ProcImage] Adding feature count:" << _img_feats.size();
-
-    // 检查视差大小，决定是否为关键帧
     if (f_manager_.addFeatureCheckParallax(frame_count, _img_feats, Tdiff_)) {
         flag_marglize_type_ = MARGIN_OLD;
         //LOG(INFO) << "[ProcImage] new keyframe, will slide out oldest ";
@@ -447,9 +444,6 @@ void VinsEstimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<d
         flag_marglize_type_ = MARGIN_SECOND_NEW;
         //LOG(INFO) << "[ProcImage] non-keyframe, will slide out second-newest ";
     }
-
-    LOG(INFO) << "[ProcImage] Solving (frame count): " << frame_count;
-    LOG(INFO) << "[ProcImage] number of robust features: " << f_manager_.getRobustFeatureCount();
 
     Headers[frame_count] = _img_time;
     ImageFrame cur_img_frame(_img_feats, _img_time);
@@ -567,7 +561,6 @@ void VinsEstimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<d
             f_tracker_.removeOutliers(removeIndex);
             predictPtsInNextFrame();
         }
-        LOG(INFO) << "[ProcImage] solve vio took " << t_solve_vio.toc() << "ms";
 
         //step04：监控系统失败
         if (failureDetection()) {

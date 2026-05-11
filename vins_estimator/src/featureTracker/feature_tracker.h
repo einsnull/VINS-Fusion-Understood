@@ -97,11 +97,18 @@ class FeatureTracker {
 
     // ==================== SuperPoint 支持 ====================
     
-    /// @brief 初始化深度学习模型 (SuperPoint引擎)
-    bool initDeepNet(const std::string& enginePath, int mode = 0);
+    /// @brief 初始化深度学习网络
+    /// @param enginePath TensorRT引擎文件路径
+    /// @param mode 0: SuperPoint提取模式, 1: SuperPoint+LightGlue pipeline模式
+    /// @param spEnginePath SuperPoint单独引擎路径 (mode=1时需要)
+    /// @return 是否初始化成功
+    bool initDeepNet(const std::string& enginePath, int mode, const std::string& spEnginePath = "");
     
     /// @brief 使用SuperPoint提取 + 光流追踪
     void trackSuperPointFlow(const cv::Mat& img);
+
+    /// @brief 使用SuperPoint + LightGlue pipeline 匹配追踪
+    void trackSuperPointLightGlue(const cv::Mat& img);
 
     // ************* 以下，我们按照各成员的含义和出现顺序，重新排列了它们，并给出注释 ************* //
 
@@ -146,6 +153,8 @@ class FeatureTracker {
     std::vector<dl::SpFeature> prev_sp_feats_;           // 上一帧SuperPoint特征
     std::vector<dl::SpFeature> cur_sp_feats_;            // 当前帧SuperPoint特征
     cv::Mat prev_img_;                                   // 上一帧图像 (LightGlue模式用)
+    std::vector<int> prev_ids_;                          // 上一帧特征ID (LightGlue模式用)
+    std::vector<int> prev_tracked_times_;                // 上一帧追踪次数 (LightGlue模式用)
 #endif
     bool use_deep_features_;                             // 是否使用深度学习特征
     int deep_feature_mode_;                              // 0: SP+光流, 1: SP+LightGlue
