@@ -1,29 +1,34 @@
 #!/bin/bash
-# 运行SuperPoint版本的VINS-Fusion
+# 运行VINS-Fusion并确保UI可视化正常显示
 
 set -e
 
-VINS_DIR=$(cd "$(dirname "$0")/.." && pwd)
-CONFIG="${1:-$VINS_DIR/config/euroc/euroc_stereo_imu_config_deep.yaml}"
-DATASET="${2:-$VINS_DIR/dataset/machine_hall/MH_01_easy}"
+CONFIG=${1:-"config/euroc/euroc_stereo_imu_config.yaml"}
+IMAGE=${2:-"ros:vins-fusion"}
+DATASET=${3:-"/storage/VINS-Fusion-Understood/dataset/machine_hall/MH_01_easy"}
 
 echo "========================================="
-echo "VINS-Fusion SuperPoint版本"
+echo "VINS-Fusion with UI"
 echo "========================================="
-echo "Config: $CONFIG"
-echo "Dataset: $DATASET"
-echo ""
 
 # 确保X11权限
 xhost +local:docker 2>/dev/null || true
 
+# 检查DISPLAY
 if [ -z "$DISPLAY" ]; then
     export DISPLAY=:1
 fi
+echo "DISPLAY=$DISPLAY"
 
-# 启动容器
-docker run -d \
-    --rm \
+VINS_DIR=$(cd "$(dirname "$0")/.." && pwd)
+mkdir -p "$VINS_DIR/output"
+
+# 获取当前用户的UID和GID
+USER_ID=$(id -u)
+GROUP_ID=$(id -g)
+
+echo "启动VINS-Fusion容器（带UI支持）..."
+docker run -it --rm \
     --net=host \
     --gpus all \
     --privileged \
@@ -31,11 +36,20 @@ docker run -d \
     -e QT_X11_NO_MITSHM=1 \
     -e NVIDIA_VISIBLE_DEVICES=all \
     -e NVIDIA_DRIVER_CAPABILITIES=all \
+    -e LIBGL_ALWAYS_SOFTWARE=1 \
+    -e __GLX_VENDOR_LIBRARY_NAME=nvidia \
     -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
     -v "$VINS_DIR:/root/catkin_ws/src/VINS-Fusion" \
+    -v "$VINS_DIR/output:/root/output" \
     -v "$DATASET:/dataset:ro" \
-    vins-fusion-tensorrt:latest \
+    "$IMAGE" \
     /bin/bash -c "
+        # 设置NVIDIA GL库
+        mv /usr/lib/x86_64-linux-gnu/mesa /usr/lib/x86_64-linux-gnu/mesa.bak 2>/dev/null || true
+        ln -sf /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0 /usr/lib/x86_64-linux-gnu/libGL.so 2>/dev/null || true
+        ln -sf /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0 /usr/lib/x86_64-linux-gnu/libGL.so.1 2>/dev/null || true
+        ldconfig 2>/dev/null || true
+        
         source /opt/ros/kinetic/setup.bash
         source /root/catkin_ws/devel/setup.bash
         
@@ -43,19 +57,21 @@ docker run -d \
         roscore &
         sleep 3
         
-        echo '启动VINS节点（SuperPoint版本）...'
-        rosrun vins vins_node /root/catkin_ws/src/VINS-Fusion/config/euroc/euroc_stereo_imu_config_deep.yaml &
+        echo '启动VINS节点（带Pangolin UI）...'
+        # 使用UI选项1启用Pangolin
+        rosrun vins vins_node /root/catkin_ws/src/VINS-Fusion/$CONFIG 1 &
         VINS_PID=\$!
         
         sleep 5
         
-        # 检查VINS是否正常运行
+        # 检查VINS是否运行
         if ! kill -0 \$VINS_PID 2>/dev/null; then
             echo '错误: VINS节点未能启动'
             exit 1
         fi
         
         echo 'VINS节点已启动'
+        echo 'Pangolin窗口应该正在显示...'
         
         # 启动RViz
         echo '启动RViz...'
@@ -71,7 +87,7 @@ docker run -d \
         
         echo ''
         echo '所有服务已启动:'
-        echo '- VINS: SuperPoint版本'
+        echo '- Pangolin: 显示VINS内部状态'
         echo '- RViz: 显示3D轨迹和点云'
         echo ''
         
@@ -79,9 +95,6 @@ docker run -d \
         wait \$BAG_PID
         
         echo '数据集播放完成'
-        
-        # 等待一段时间让VINS完成处理
-        sleep 10
         
         # 停止VINS和RViz
         kill \$VINS_PID 2>/dev/null || true
@@ -92,6 +105,3 @@ docker run -d \
         
         echo '完成!'
     "
-
-echo "容器已启动"
-echo "使用 'docker logs -f \$(docker ps -q --filter ancestor=vins-fusion-tensorrt:latest)' 查看日志"

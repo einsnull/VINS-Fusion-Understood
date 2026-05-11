@@ -1,16 +1,14 @@
 #!/bin/bash
-# 运行SuperPoint版本的VINS-Fusion
+# 运行SuperPoint版本的完整测试
 
 set -e
 
 VINS_DIR=$(cd "$(dirname "$0")/.." && pwd)
-CONFIG="${1:-$VINS_DIR/config/euroc/euroc_stereo_imu_config_deep.yaml}"
-DATASET="${2:-$VINS_DIR/dataset/machine_hall/MH_01_easy}"
+DATASET="${1:-$VINS_DIR/dataset/machine_hall/MH_01_easy}"
 
 echo "========================================="
-echo "VINS-Fusion SuperPoint版本"
+echo "VINS-Fusion SuperPoint版本测试"
 echo "========================================="
-echo "Config: $CONFIG"
 echo "Dataset: $DATASET"
 echo ""
 
@@ -21,9 +19,8 @@ if [ -z "$DISPLAY" ]; then
     export DISPLAY=:1
 fi
 
-# 启动容器
-docker run -d \
-    --rm \
+# 启动容器（前台运行以便查看日志）
+docker run --rm \
     --net=host \
     --gpus all \
     --privileged \
@@ -40,6 +37,7 @@ docker run -d \
         source /root/catkin_ws/devel/setup.bash
         
         # 启动roscore
+        echo '启动roscore...'
         roscore &
         sleep 3
         
@@ -92,6 +90,3 @@ docker run -d \
         
         echo '完成!'
     "
-
-echo "容器已启动"
-echo "使用 'docker logs -f \$(docker ps -q --filter ancestor=vins-fusion-tensorrt:latest)' 查看日志"

@@ -51,37 +51,63 @@ endif()
 option(USE_TENSORRT "Enable TensorRT for deep learning features" OFF)
 
 if(USE_TENSORRT)
+  # Find CUDA (optional, for includes)
   find_package(CUDA QUIET)
   if(CUDA_FOUND)
     message(STATUS "## CUDA found: " ${CUDA_VERSION})
-    message(STATUS "## CUDA_INCLUDE_DIRS: " ${CUDA_INCLUDE_DIRS})
-    message(STATUS "## CUDA_LIBRARIES: " ${CUDA_LIBRARIES})
-    
+    include_directories(${CUDA_INCLUDE_DIRS})
+  else()
+    message(STATUS "## CUDA not found, but TensorRT may still work")
+  endif()
+  
+  # Find TensorRT - use absolute paths for Docker environment
+  if(EXISTS /usr/include/NvInfer.h)
+    set(TENSORRT_INCLUDE_DIR /usr/include)
+    set(TENSORRT_LIBRARY /usr/lib/x86_64-linux-gnu/libnvinfer.so)
+    if(EXISTS /usr/lib/x86_64-linux-gnu/libnvonnxparser.so)
+      set(TENSORRT_ONNXPARSER_LIBRARY /usr/lib/x86_64-linux-gnu/libnvonnxparser.so)
+    else()
+      set(TENSORRT_ONNXPARSER_LIBRARY "")
+    endif()
+    message(STATUS "## TensorRT found (absolute path)")
+  else()
     # Find TensorRT
     find_path(TENSORRT_INCLUDE_DIR NvInfer.h
-      HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+      HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR} /usr/include
       PATH_SUFFIXES include)
     find_library(TENSORRT_LIBRARY nvinfer
-      HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+      HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR} /usr/lib/x86_64-linux-gnu
       PATH_SUFFIXES lib lib64 lib/x64)
     find_library(TENSORRT_ONNXPARSER_LIBRARY nvonnxparser
-      HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+      HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR} /usr/lib/x86_64-linux-gnu
       PATH_SUFFIXES lib lib64 lib/x64)
+  endif()
+  
+  if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY)
+    message(STATUS "## TensorRT found")
+    message(STATUS "## TENSORRT_INCLUDE_DIR: " ${TENSORRT_INCLUDE_DIR})
+    message(STATUS "## TENSORRT_LIBRARY: " ${TENSORRT_LIBRARY})
     
-    if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY)
-      message(STATUS "## TensorRT found")
-      message(STATUS "## TENSORRT_INCLUDE_DIR: " ${TENSORRT_INCLUDE_DIR})
-      message(STATUS "## TENSORRT_LIBRARY: " ${TENSORRT_LIBRARY})
-      
-      include_directories(${CUDA_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR})
-      add_definitions(-DUSE_TENSORRT)
-      set(TENSORRT_LIBS ${TENSORRT_LIBRARY} ${TENSORRT_ONNXPARSER_LIBRARY} ${CUDA_LIBRARIES})
-    else()
-      message(WARNING "## TensorRT not found, disabling deep learning features")
-      set(USE_TENSORRT OFF)
+    include_directories(${TENSORRT_INCLUDE_DIR})
+    add_definitions(-DUSE_TENSORRT)
+    # Link TensorRT and CUDA libraries
+    set(TENSORRT_LIBS ${TENSORRT_LIBRARY})
+    # Find and link CUDA libraries
+    find_library(CUDA_RUNTIME_LIBRARY cudart HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu)
+    find_library(CUDA_DRIVER_LIBRARY cuda HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu)
+    if(CUDA_RUNTIME_LIBRARY)
+      list(APPEND TENSORRT_LIBS ${CUDA_RUNTIME_LIBRARY})
+    endif()
+    if(CUDA_DRIVER_LIBRARY)
+      list(APPEND TENSORRT_LIBS ${CUDA_DRIVER_LIBRARY})
+    endif()
+    # Find and link ONNX parser
+    find_library(TENSORRT_ONNXPARSER_LIBRARY nvonnxparser HINTS /usr/lib/x86_64-linux-gnu)
+    if(TENSORRT_ONNXPARSER_LIBRARY)
+      list(APPEND TENSORRT_LIBS ${TENSORRT_ONNXPARSER_LIBRARY})
     endif()
   else()
-    message(WARNING "## CUDA not found, disabling deep learning features")
+    message(WARNING "## TensorRT not found, disabling deep learning features")
     set(USE_TENSORRT OFF)
   endif()
 endif()

@@ -119,6 +119,16 @@ void VinsEstimator::setParameter() {
     LOG(INFO) << "[Params] set g: " << Grav_.transpose();
     f_tracker_.readIntrinsicParameter(CAM_NAMES);
 
+    // Initialize deep learning features if enabled
+    if (USE_DEEP_FEATURES) {
+        LOG(INFO) << "[Params] Initializing deep learning features...";
+        bool init_success = f_tracker_.initDeepNet(SP_ENGINE_PATH, LG_ENGINE_PATH, DEEP_FEATURE_MODE);
+        if (!init_success) {
+            LOG(WARNING) << "[Params] Failed to initialize deep learning features, falling back to traditional features";
+            USE_DEEP_FEATURES = 0;  // Disable deep features if initialization fails
+        }
+    }
+
     LOG(INFO) << "[Params] MULTIPLE_THREAD is: " << MULTIPLE_THREAD;
     if (MULTIPLE_THREAD && !flag_init_proc_thread_) {
         flag_init_proc_thread_ = true;

@@ -18,14 +18,26 @@ bool SuperPointLightGlue::init(const std::string& spEnginePath,
     spEngine_ = std::make_unique<trt::TrtEngine>();
     if (!spEngine_->loadEngine(spEnginePath)) {
         std::cerr << "Failed to load SuperPoint engine: " << spEnginePath << std::endl;
-        return false;
+        // Try to build from ONNX
+        std::string spOnnxPath = spEnginePath.substr(0, spEnginePath.find_last_of('.')) + ".onnx";
+        std::cout << "Trying to build from ONNX: " << spOnnxPath << std::endl;
+        if (!spEngine_->buildEngineFromOnnx(spOnnxPath, spEnginePath, 1, false)) {
+            std::cerr << "Failed to build SuperPoint engine from ONNX" << std::endl;
+            return false;
+        }
     }
     
     if (mode_ == 1 && !lgEnginePath.empty()) {
         lgEngine_ = std::make_unique<trt::TrtEngine>();
         if (!lgEngine_->loadEngine(lgEnginePath)) {
             std::cerr << "Failed to load LightGlue engine: " << lgEnginePath << std::endl;
-            return false;
+            // Try to build from ONNX
+            std::string lgOnnxPath = lgEnginePath.substr(0, lgEnginePath.find_last_of('.')) + ".onnx";
+            std::cout << "Trying to build from ONNX: " << lgOnnxPath << std::endl;
+            if (!lgEngine_->buildEngineFromOnnx(lgOnnxPath, lgEnginePath, 1, false)) {
+                std::cerr << "Failed to build LightGlue engine from ONNX" << std::endl;
+                return false;
+            }
         }
     }
     

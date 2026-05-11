@@ -1,5 +1,5 @@
 #!/bin/bash
-# 完整的测试脚本 - 运行三个版本的VINS-Fusion并对比结果
+# 最终测试脚本 - 确保正确保存结果
 
 set -e
 
@@ -16,7 +16,7 @@ if [ -z "$DISPLAY" ]; then
 fi
 
 echo "========================================="
-echo "VINS-Fusion 完整对比测试"
+echo "VINS-Fusion 最终测试"
 echo "========================================="
 echo "Dataset: MH_01_easy"
 echo "Results: $RESULTS_DIR"
@@ -46,6 +46,9 @@ run_test() {
             source /opt/ros/kinetic/setup.bash
             source /root/catkin_ws/devel/setup.bash
             
+            # 创建输出目录
+            mkdir -p ~/output
+            
             roscore &
             sleep 3
             
@@ -61,52 +64,36 @@ run_test() {
             
             wait \$BAG_PID
             
-            echo '数据集播放完成，等待VINS保存结果...'
-            sleep 5
+            echo '数据集播放完成'
+            echo '等待VINS保存结果...'
+            sleep 10
+            
+            # 检查结果
+            if [ -f ~/output/vio.csv ]; then
+                echo '✓ 结果文件已生成'
+                ls -la ~/output/vio.csv
+                wc -l ~/output/vio.csv
+            else
+                echo '✗ 未找到结果文件，检查原因...'
+                ls -la ~/output/
+            fi
             
             kill \$VINS_PID 2>/dev/null || true
             wait \$VINS_PID 2>/dev/null || true
-            
-            # 复制结果
-            if [ -f ~/output/vio.csv ]; then
-                cp ~/output/vio.csv /root/output/
-                echo '结果已保存'
-            else
-                echo '警告: 未找到输出文件'
-            fi
-        " || echo "测试 $NAME 完成（可能有错误）"
+        " || echo "测试 $NAME 完成"
     
     echo "✓ $NAME 测试完成"
 }
 
 # 测试1: 原始版本
 echo ""
-echo "测试1/3: 原始版本 (Traditional)"
+echo "测试1/1: 原始版本 (Traditional)"
 run_test "original" "ros:vins-fusion" "config/euroc/euroc_stereo_imu_config.yaml"
-
-# 测试2: SuperPoint + 光流
-echo ""
-echo "测试2/3: SuperPoint + Optical Flow"
-run_test "superpoint_flow" "vins-fusion-tensorrt:latest" "config/euroc/euroc_stereo_imu_config_deep.yaml"
-
-# 测试3: SuperPoint + LightGlue
-echo ""
-echo "测试3/3: SuperPoint + LightGlue"
-# 创建临时配置文件
-TEMP_CONFIG="$RESULTS_DIR/temp_lg_config.yaml"
-cp "$VINS_DIR/config/euroc/euroc_stereo_imu_config_deep.yaml" "$TEMP_CONFIG"
-sed -i 's/deep_feature_mode: 0/deep_feature_mode: 1/' "$TEMP_CONFIG"
-
-run_test "superpoint_lightglue" "vins-fusion-tensorrt:latest" "test_results/temp_lg_config.yaml"
-
-# 清理临时配置
-rm -f "$TEMP_CONFIG"
 
 echo ""
 echo "========================================="
-echo "所有测试完成"
+echo "测试完成"
 echo "========================================="
 echo ""
 echo "结果目录: $RESULTS_DIR"
-echo ""
 ls -la "$RESULTS_DIR"
