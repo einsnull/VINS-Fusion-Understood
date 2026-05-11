@@ -105,6 +105,9 @@ RUN pip3 install --no-cache-dir \
     --index-url https://download.pytorch.org/whl/cu117 \
     && python3 -c "import torch; print('PyTorch', torch.__version__, 'CUDA', torch.cuda.is_available())"
 
+# Install matplotlib for comparison plots
+RUN pip3 install --no-cache-dir matplotlib
+
 # Set environment variables
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:/usr/local/cuda/lib64/stubs:${LD_LIBRARY_PATH}
 ENV LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:${LIBRARY_PATH}
@@ -129,7 +132,11 @@ RUN /bin/bash -c "source /opt/ros/${ROS_DISTRO}/setup.bash && \
     -DCMAKE_BUILD_TYPE=Release \
     -DUSE_TENSORRT=ON \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && \
-    catkin build"
+    catkin build && \
+    rm -rf build/ .catkin_tools/"
+
+# Clean up temp files to reduce image size
+RUN rm -rf /tmp/* /root/.cache/pip /var/lib/apt/lists/*
 
 # Set up entrypoint
 RUN echo '#!/bin/bash\nsource /opt/ros/noetic/setup.bash\nsource /root/catkin_ws/devel/setup.bash\nexec "$@"' > /ros_entrypoint.sh && \
